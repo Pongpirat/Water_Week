@@ -269,13 +269,13 @@ def plot_results(data_before, data_filled, data_deleted):
     min_y = combined_data[['ข้อมูลเดิม', 'ข้อมูลหลังเติมค่า', 'ข้อมูลหลังสุ่มลบ']].min().min()
     max_y = combined_data[['ข้อมูลเดิม', 'ข้อมูลหลังเติมค่า', 'ข้อมูลหลังสุ่มลบ']].max().max()
 
-    chart = alt.Chart(combined_data).mark_line().encode(
+    chart = alt.Chart(combined_data).transform_fold(
+        ['ข้อมูลเดิม', 'ข้อมูลหลังเติมค่า', 'ข้อมูลหลังสุ่มลบ'],
+        as_=['ข้อมูล', 'ระดับน้ำ']
+    ).mark_line().encode(
         x='วันที่:T',
         y=alt.Y('ระดับน้ำ:Q', scale=alt.Scale(domain=[min_y, max_y])),
         color=alt.Color('ข้อมูล:N',legend=alt.Legend(orient='bottom', title='ข้อมูล'))
-    ).transform_fold(
-        ['ข้อมูลเดิม', 'ข้อมูลหลังเติมค่า', 'ข้อมูลหลังสุ่มลบ'],
-        as_=['ข้อมูล', 'ระดับน้ำ']
     ).properties(
         title='ข้อมูลหลังจากการเติมค่าที่หายไป',
         height=400
@@ -283,7 +283,7 @@ def plot_results(data_before, data_filled, data_deleted):
 
     st.altair_chart(chart, use_container_width=True)
 
-    st.write("ตารางแสดงข้อมูล")
+    st.write("ตารางแสดงข้อมูลหลังเติมค่า")
     st.dataframe(data_filled)
 
 def plot_data_preview(df):
