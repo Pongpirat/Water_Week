@@ -234,11 +234,9 @@ def randomly_delete_data(data, start_date, end_date):
         num_rows = len(group)
         num_rows_to_delete = num_days_to_delete * 96
 
-        if num_rows < num_rows_to_delete:
-            num_rows_to_delete = num_rows  # ถ้าจำนวนแถวไม่เพียงพอให้ลบทั้งหมด
-
-        # สุ่มตำแหน่งเริ่มต้น
-        if num_rows > 0:
+        # ตรวจสอบว่าจำนวนแถวเพียงพอหรือไม่
+        if num_rows >= num_rows_to_delete and num_rows_to_delete > 0:
+            # สุ่มตำแหน่งเริ่มต้น
             random_start_idx = np.random.randint(0, num_rows - num_rows_to_delete + 1)
             delete_indices = group.index[random_start_idx:random_start_idx + num_rows_to_delete]
 
