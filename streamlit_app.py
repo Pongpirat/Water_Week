@@ -298,7 +298,7 @@ def plot_data_preview(df):
     st.altair_chart(chart, use_container_width=True)
 
 # Streamlit UI
-st.title("การจัดการกับข้อมูลระดับน้ำด้วย Random Forest")
+st.title("การจัดการกับข้อมูลระดับน้ำด้วย Random Forest (week)")
 
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV", type="csv")
 
