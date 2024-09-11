@@ -39,10 +39,7 @@ def create_time_features(data_clean):
     data_clean['minute'] = data_clean['datetime'].dt.minute
     data_clean['day_of_week'] = data_clean['datetime'].dt.dayofweek
     data_clean['day_of_year'] = data_clean['datetime'].dt.dayofyear
-    
-    # Adjust for week starting on Sunday
-    data_clean['week_of_year'] = data_clean['datetime'].apply(lambda x: (x - pd.DateOffset(days=(x.dayofweek + 1) % 7)).week)
-    
+    data_clean['week_of_year'] = data_clean['datetime'].dt.isocalendar().week
     data_clean['days_in_month'] = data_clean['datetime'].dt.days_in_month
 
     return data_clean
@@ -256,13 +253,13 @@ def plot_results(data_before, data_filled, data_deleted):
         y=alt.Y('ระดับน้ำ:Q', scale=alt.Scale(domain=[min_y, max_y])),
         color=alt.Color('ข้อมูล:N',legend=alt.Legend(orient='bottom', title='ข้อมูล'))
     ).properties(
-        title='ข้อมูลหลังจากการเติมค่าที่หายไป',
         height=400
     ).interactive()
 
+    st.subheader("ข้อมูลหลังจากการเติมค่าที่หายไป")
     st.altair_chart(chart, use_container_width=True)
 
-    st.write("ตารางแสดงข้อมูลหลังเติมค่า")
+    st.subheader("ตารางแสดงข้อมูลหลังเติมค่า")
     st.dataframe(data_filled)
 
     calculate_accuracy_metrics(data_before, data_filled)
@@ -281,6 +278,10 @@ def plot_data_preview(df):
     st.altair_chart(chart, use_container_width=True)
 
 # Streamlit UI
+st.set_page_config(
+    page_title="RandomForest",
+    page_icon="🌲"
+)
 st.title("การจัดการกับข้อมูลระดับน้ำด้วย Random Forest (week)")
 
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV", type="csv")
@@ -295,7 +296,7 @@ if uploaded_file is not None:
 
     st.subheader("เลือกช่วงวันที่สำหรับการจัดการข้อมูล")
     start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2023-10-01"))
-    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2023-10-07"))
+    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2023-10-31"))
 
     st.subheader("เลือกช่วงวันที่สำหรับการลบข้อมูล")
     delete_start_date = st.date_input("วันที่เริ่มต้นสำหรับลบข้อมูล", value=start_date, key='delete_start')
@@ -304,6 +305,9 @@ if uploaded_file is not None:
     if st.button("เลือก"):
         st.markdown("---")
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
+
+        end_date = end_date + pd.DateOffset(days=1)
+        delete_end_date = delete_end_date + pd.DateOffset(days=1)
         
         df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date))]
 
