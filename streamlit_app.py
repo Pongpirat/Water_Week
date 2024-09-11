@@ -39,11 +39,11 @@ def create_time_features(data_clean):
     data_clean['minute'] = data_clean['datetime'].dt.minute
     data_clean['day_of_week'] = data_clean['datetime'].dt.dayofweek
     data_clean['day_of_year'] = data_clean['datetime'].dt.dayofyear
-    data_clean['week_of_year'] = data_clean['datetime'].dt.isocalendar().week
+    
+    # Adjust for week starting on Sunday
+    data_clean['week_of_year'] = data_clean['datetime'].apply(lambda x: (x - pd.DateOffset(days=(x.dayofweek + 1) % 7)).week)
+    
     data_clean['days_in_month'] = data_clean['datetime'].dt.days_in_month
-
-    # st.write("Missing values after creating time features:")
-    # st.write(data_clean.isnull().sum())
 
     return data_clean
 
@@ -105,18 +105,6 @@ def apply_ema_and_sma(data, ema_span=12, sma_window=12):
 def apply_median_filter(data, window_size=5):
     data['wl_up'] = data['wl_up'].rolling(window=window_size, min_periods=1, center=True).median()
     return data
-
-# def fill_outliers_with_rf_and_smooth(data_clean):
-#     feature_cols = ['year', 'month', 'day', 'hour', 'minute',
-#                     'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month']
-
-#     Q1 = data_clean['wl_up'].quantile(0.25)
-#     Q3 = data_clean['wl_up'].quantile(0.75)
-#     IQR = Q3 - Q1
-#     outliers = ((data_clean['wl_up'] < (Q1 - 1.5 * IQR)) | (data_clean['wl_up'] > (Q3 + 1.5 * IQR)))
-
-#     data_clean.loc[outliers, 'wl_up'] = np.nan
-#     return data_clean
 
 def handle_missing_values_by_week(data_clean, start_date, end_date):
     feature_cols = ['year', 'month', 'day', 'hour', 'minute',
@@ -212,38 +200,31 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
 
-def randomly_delete_data(data, start_date, end_date):
-    # Convert start_date and end_date to datetime
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date)
+def delete_data_by_date_range(data, delete_start_date, delete_end_date):
+    # Convert delete_start_date and delete_end_date to datetime
+    delete_start_date = pd.to_datetime(delete_start_date)
+    delete_end_date = pd.to_datetime(delete_end_date)
 
-    # กรองข้อมูลเฉพาะช่วงเวลาที่ระบุ
-    data_filtered = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
+    # ตรวจสอบว่าช่วงวันที่ต้องการลบข้อมูลอยู่ในช่วงของ data หรือไม่
+    data_to_delete = data[(data['datetime'] >= delete_start_date) & (data['datetime'] <= delete_end_date)]
 
-    # เรียงข้อมูลตามสัปดาห์
-    weekly_groups = data_filtered.groupby('week_of_year')
-
-    # ลบข้อมูลในแต่ละสัปดาห์
-    for week, group in weekly_groups:
-        # จำนวนวันที่ต้องการลบในแต่ละสัปดาห์ (สุ่มระหว่าง 0-3 วัน)
-        min_days = 0
-        max_days = 3
-        num_days_to_delete = np.random.randint(min_days, max_days + 1)
-
-        # จำนวนแถวในกลุ่ม (สัปดาห์) ที่จะลบ
-        num_rows = len(group)
-        num_rows_to_delete = num_days_to_delete * 96
-
-        # ตรวจสอบว่าจำนวนแถวเพียงพอหรือไม่
-        if num_rows >= num_rows_to_delete and num_rows_to_delete > 0:
-            # สุ่มตำแหน่งเริ่มต้น
-            random_start_idx = np.random.randint(0, num_rows - num_rows_to_delete + 1)
-            delete_indices = group.index[random_start_idx:random_start_idx + num_rows_to_delete]
-
-            # ลบข้อมูล
-            data.loc[delete_indices, 'wl_up'] = np.nan
-
+    if not data_to_delete.empty:
+        # ลบข้อมูลโดยตั้งค่า wl_up เป็น NaN
+        data.loc[data_to_delete.index, 'wl_up'] = np.nan
+    else:
+        st.write(f"No data found between {delete_start_date} and {delete_end_date}.")
+    
     return data
+
+def calculate_accuracy_metrics(original, filled):
+    merged_data = pd.merge(original, filled, on='datetime', suffixes=('_original', '_filled'))
+    mse = mean_squared_error(merged_data['wl_up_original'], merged_data['wl_up_filled'])
+    mae = mean_absolute_error(merged_data['wl_up_original'], merged_data['wl_up_filled'])
+    r2 = r2_score(merged_data['wl_up_original'], merged_data['wl_up_filled'])
+
+    st.write(f"Mean Squared Error (MSE): {mse:.4f}")
+    st.write(f"Mean Absolute Error (MAE): {mae:.4f}")
+    st.write(f"R-squared (R²): {r2:.4f}")
 
 def plot_results(data_before, data_filled, data_deleted):
     data_before_filled = pd.DataFrame({
@@ -284,6 +265,8 @@ def plot_results(data_before, data_filled, data_deleted):
     st.write("ตารางแสดงข้อมูลหลังเติมค่า")
     st.dataframe(data_filled)
 
+    calculate_accuracy_metrics(data_before, data_filled)
+
 def plot_data_preview(df):
     min_y = df['wl_up'].min()
     max_y = df['wl_up'].max()
@@ -310,20 +293,19 @@ if uploaded_file is not None:
     df_pre = create_time_features(df_pre)
     plot_data_preview(df_pre)
 
+    st.subheader("เลือกช่วงวันที่สำหรับการจัดการข้อมูล")
     start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2023-10-01"))
-    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2023-11-30"))
+    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2023-10-07"))
+
+    st.subheader("เลือกช่วงวันที่สำหรับการลบข้อมูล")
+    delete_start_date = st.date_input("วันที่เริ่มต้นสำหรับลบข้อมูล", value=start_date, key='delete_start')
+    delete_end_date = st.date_input("วันที่สิ้นสุดสำหรับลบข้อมูล", value=end_date, key='delete_end')
 
     if st.button("เลือก"):
         st.markdown("---")
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
         
         df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date))]
-
-        # st.write("Filtered Data Preview:")
-        # st.write(df_filtered.head())
-
-        # Check missing values initially
-        # check_missing_values(df_filtered)
 
         # Clean data
         df_clean = clean_data(df_filtered)
@@ -341,7 +323,7 @@ if uploaded_file is not None:
         df_before_random_deletion = df_filtered.copy()
 
         # Randomly delete data
-        df_deleted = randomly_delete_data(df_clean, start_date, end_date)
+        df_deleted = delete_data_by_date_range(df_clean, delete_start_date, delete_end_date)
         
         # Handle missing values by week
         df_handled = handle_missing_values_by_week(df_clean, start_date, end_date)
