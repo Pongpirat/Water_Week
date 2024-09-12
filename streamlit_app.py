@@ -190,9 +190,9 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
             if X_missing_scaled.shape[0] == group.shape[0]:
                 data_with_all_dates.loc[group.index, 'wl_up'] = model_combined.predict(X_missing_scaled)
 
-    data_with_all_dates = apply_ema_and_sma(data_with_all_dates, ema_span=20, sma_window=20)
+    # data_with_all_dates = apply_ema_and_sma(data_with_all_dates, ema_span=20, sma_window=20)
 
-    data_with_all_dates = apply_median_filter(data_with_all_dates, window_size=5)
+    # data_with_all_dates = apply_median_filter(data_with_all_dates, window_size=5)
 
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
