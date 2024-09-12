@@ -295,8 +295,8 @@ if uploaded_file is not None:
     plot_data_preview(df_pre)
 
     st.subheader("เลือกช่วงวันที่สำหรับการจัดการข้อมูล")
-    start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2023-10-01"))
-    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2023-10-31"))
+    start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-08-01"))
+    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31"))
 
     st.subheader("เลือกช่วงวันที่สำหรับการลบข้อมูล")
     delete_start_date = st.date_input("วันที่เริ่มต้นสำหรับลบข้อมูล", value=start_date, key='delete_start')
