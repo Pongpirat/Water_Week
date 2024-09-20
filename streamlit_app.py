@@ -3,22 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler
 import altair as alt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import warnings
-
-# ปิดข้อความเตือนทั้งหมด
-warnings.filterwarnings("ignore")
 
 def load_data(file):
     return pd.read_csv(file)
-
-def check_missing_values(df, step="Initial"):
-    """Check and print missing values in the DataFrame."""
-    missing_values = df.isnull().sum()
-    st.write(f"Missing values at {step}:")
-    st.write(missing_values)
 
 def clean_data(df):
     data_clean = df.copy()
@@ -55,7 +44,6 @@ def prepare_features(data_clean):
     return X, y
 
 def train_model(X_train, y_train):
-    """Train model with RandomizedSearchCV for hyperparameter tuning."""
     param_distributions = {
         'n_estimators': [50, 100, 200],
         'max_depth': [None, 10, 20, 30],
@@ -68,9 +56,6 @@ def train_model(X_train, y_train):
     n_splits = min(3, len(X_train) // 2)  # Ensuring at least 2 folds if possible
     random_search = RandomizedSearchCV(estimator=rf, param_distributions=param_distributions, n_iter=10, cv=n_splits, n_jobs=-1, verbose=2, random_state=42)
     random_search.fit(X_train, y_train)
-
-    # st.write("Best parameters found: ", random_search.best_params_)
-    # st.write("Best score found: ", random_search.best_score_)
 
     return random_search.best_estimator_
 
@@ -94,15 +79,6 @@ def fill_code_column(data):
     data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
     return data
 
-def apply_ema_and_sma(data, ema_span=12, sma_window=12):
-    data['wl_up'] = data['wl_up'].ewm(span=ema_span, adjust=False).mean()
-    data['wl_up'] = data['wl_up'].rolling(window=sma_window, min_periods=1).mean()
-    return data
-
-def apply_median_filter(data, window_size=5):
-    data['wl_up'] = data['wl_up'].rolling(window=window_size, min_periods=1, center=True).median()
-    return data
-
 def handle_missing_values_by_week(data_clean, start_date, end_date):
     feature_cols = ['year', 'month', 'day', 'hour', 'minute',
                     'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month']
@@ -116,8 +92,9 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
     # Filter data based on the datetime range
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
 
+    # Generate all missing dates within the selected range
     data_with_all_dates = generate_missing_dates(data)
-    data_with_all_dates.index = pd.to_datetime(data_with_all_dates.index)
+    data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
@@ -125,12 +102,13 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
         st.write("No missing values to predict.")
         return data_with_all_dates
 
+    # Train initial model with all available data
     X_train, y_train = prepare_features(data_not_missing)
-    X_train_scaled = StandardScaler().fit_transform(X_train)
-    model = train_model(X_train_scaled, y_train)
+    model = train_model(X_train, y_train)
 
-    weeks_with_more_missing = []
+    # Separate weeks with fewer and more missing rows
     weeks_with_fewer_missing = []
+    weeks_with_more_missing = []
 
     weeks_with_missing = data_missing['week_of_year'].unique()
 
@@ -142,25 +120,26 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
         else:
             weeks_with_more_missing.append(week)
 
+    # Handle weeks with fewer than 288 missing rows by predicting missing values row-by-row
     for week in weeks_with_fewer_missing:
         group = data_missing[data_missing['week_of_year'] == week]
-        # st.write(f"Handling missing values for week {week} with {group['wl_up'].isnull().sum()} missing values.")
         week_data = data_not_missing[data_not_missing['week_of_year'] == week]
+
         if len(week_data) > 0:
             X_train_week, y_train_week = prepare_features(week_data)
-            X_train_week_scaled = StandardScaler().fit_transform(X_train_week)
-            model_week = train_model(X_train_week_scaled, y_train_week)
+            model_week = train_model(X_train_week, y_train_week)
 
-            X_missing = group[feature_cols]
-            X_missing_scaled = StandardScaler().fit_transform(X_missing)
-            if X_missing_scaled.shape[0] == group.shape[0]:
-                data_with_all_dates.loc[group.index, 'wl_up'] = model_week.predict(X_missing_scaled)
+            for idx, row in group.iterrows():
+                X_missing = row[feature_cols].values.reshape(1, -1)
+                predicted_value = model_week.predict(X_missing)
+                data_with_all_dates.loc[idx, 'wl_up'] = predicted_value
 
+    # Update data_not_missing after filling values
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
+    # Handle weeks with more than 288 missing rows using data from adjacent weeks
     for week in weeks_with_more_missing:
         group = data_missing[data_missing['week_of_year'] == week]
-        # st.write(f"Handling missing values for week {week} with {group['wl_up'].isnull().sum()} missing values.")
         prev_week = week - 1 if week > min(weeks_with_missing) else week
         next_week = week + 1 if week < max(weeks_with_missing) else week
 
@@ -172,27 +151,21 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
             current_month = group['month'].iloc[0]
             non_missing_month_data = data_clean[(data_clean['month'] == current_month) & (~data_clean['wl_up'].isnull())]
 
-            # print(f"Handling missing values for week {week} using all non-missing data from month {current_month}.")
             X_train_month, y_train_month = prepare_features(non_missing_month_data)
-            X_train_month_scaled = StandardScaler().fit_transform(X_train_month)
-            model_month = train_model(X_train_month_scaled, y_train_month)
+            model_month = train_model(X_train_month, y_train_month)
 
-            X_missing = group[feature_cols]
-            X_missing_scaled = StandardScaler().fit_transform(X_missing)
-            if X_missing_scaled.shape[0] == group.shape[0]:
-                data_with_all_dates.loc[group.index, 'wl_up'] = model_month.predict(X_missing_scaled)
+            for idx, row in group.iterrows():
+                X_missing = row[feature_cols].values.reshape(1, -1)
+                predicted_value = model_month.predict(X_missing)
+                data_with_all_dates.loc[idx, 'wl_up'] = predicted_value
         else:
             combined_train_X, combined_train_y = prepare_features(combined_data)
-            combined_train_X_scaled = StandardScaler().fit_transform(combined_train_X)
-            model_combined = train_model(combined_train_X_scaled, combined_train_y)
-            X_missing = group[feature_cols]
-            X_missing_scaled = StandardScaler().fit_transform(X_missing)
-            if X_missing_scaled.shape[0] == group.shape[0]:
-                data_with_all_dates.loc[group.index, 'wl_up'] = model_combined.predict(X_missing_scaled)
+            model_combined = train_model(combined_train_X, combined_train_y)
 
-    # data_with_all_dates = apply_ema_and_sma(data_with_all_dates, ema_span=20, sma_window=20)
-
-    # data_with_all_dates = apply_median_filter(data_with_all_dates, window_size=5)
+            for idx, row in group.iterrows():
+                X_missing = row[feature_cols].values.reshape(1, -1)
+                predicted_value = model_combined.predict(X_missing)
+                data_with_all_dates.loc[idx, 'wl_up'] = predicted_value
 
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
@@ -294,17 +267,22 @@ if uploaded_file is not None:
     df_pre = create_time_features(df_pre)
     plot_data_preview(df_pre)
 
-    st.subheader("เลือกช่วงวันที่สำหรับการจัดการข้อมูล")
+    st.subheader("เลือกช่วงที่ต้องการข้อมูล")
     start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-08-01"))
     end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31"))
 
-    st.subheader("เลือกช่วงวันที่สำหรับการลบข้อมูล")
-    delete_start_date = st.date_input("วันที่เริ่มต้นสำหรับลบข้อมูล", value=start_date, key='delete_start')
-    delete_end_date = st.date_input("วันที่สิ้นสุดสำหรับลบข้อมูล", value=end_date, key='delete_end')
+    st.subheader("เลือกช่วงที่ต้องการลบ")
+    delete_start_date = st.date_input("กำหนดเริ่มต้นลบข้อมูล", value=start_date, key='delete_start')
+    delete_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='delete_start_time')
+    delete_end_date = st.date_input("กำหนดสิ้นสุดลบข้อมูล", value=end_date, key='delete_end')
+    delete_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time(), key='delete_end_time')
 
     if st.button("เลือก"):
         st.markdown("---")
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
+
+        delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
+        delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}")
 
         end_date = end_date + pd.DateOffset(days=1)
         delete_end_date = delete_end_date + pd.DateOffset(days=1)
@@ -327,11 +305,10 @@ if uploaded_file is not None:
         df_before_random_deletion = df_filtered.copy()
 
         # Randomly delete data
-        df_deleted = delete_data_by_date_range(df_clean, delete_start_date, delete_end_date)
+        df_deleted = delete_data_by_date_range(df_clean, delete_start_datetime, delete_end_datetime)
         
         # Handle missing values by week
         df_handled = handle_missing_values_by_week(df_clean, start_date, end_date)
 
         # Plot the results using Streamlit's line chart
         plot_results(df_before_random_deletion, df_handled, df_deleted)
-    st.markdown("---")
