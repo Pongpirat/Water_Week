@@ -45,16 +45,19 @@ def prepare_features(data_clean):
 
 def train_model(X_train, y_train):
     param_distributions = {
-        'n_estimators': [50, 100, 200],
-        'max_depth': [None, 10, 20, 30],
+        'n_estimators': [100, 200, 500, 1000],  # ขยายช่วงของ n_estimators
+        'max_depth': [None, 10, 20, 50],  # ปรับ max_depth ให้กว้างขึ้น
         'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4]
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['auto', 'sqrt', 'log2'],
+        'bootstrap': [True, False],  # ทดสอบการใช้ข้อมูลทั้งหมดในแต่ละต้นไม้หรือบางส่วน
+        'max_samples': [None, 0.8, 0.9]  # กำหนด max_samples เพื่อสุ่มตัวอย่างในแต่ละต้นไม้
     }
 
     rf = RandomForestRegressor(random_state=42)
 
-    n_splits = min(3, len(X_train) // 2)  # Ensuring at least 2 folds if possible
-    random_search = RandomizedSearchCV(estimator=rf, param_distributions=param_distributions, n_iter=10, cv=n_splits, n_jobs=-1, verbose=2, random_state=42)
+    n_splits = min(3, len(X_train) // 2)
+    random_search = RandomizedSearchCV(estimator=rf, param_distributions=param_distributions, n_iter=20, cv=n_splits, n_jobs=-1, verbose=2, random_state=42)
     random_search.fit(X_train, y_train)
 
     return random_search.best_estimator_
@@ -143,9 +146,12 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
         prev_week = week - 1 if week > min(weeks_with_missing) else week
         next_week = week + 1 if week < max(weeks_with_missing) else week
 
+        # เพิ่มข้อมูลจากสัปดาห์หรือเดือนก่อนหน้าในชุดข้อมูลฝึกโมเดล
         prev_data = data_not_missing[data_not_missing['week_of_year'] == prev_week]
         next_data = data_not_missing[data_not_missing['week_of_year'] == next_week]
-        combined_data = pd.concat([prev_data, next_data])
+        previous_month_data = data_not_missing[data_not_missing['month'] == group['month'].iloc[0] - 1]  # ใช้ข้อมูลเดือนก่อนหน้า
+
+        combined_data = pd.concat([prev_data, next_data, previous_month_data])  # รวมข้อมูลเพิ่มเติมเพื่อฝึกโมเดล
 
         if data_missing[data_missing['week_of_year'] == next_week]['wl_up'].isnull().sum() > 288:
             current_month = group['month'].iloc[0]
