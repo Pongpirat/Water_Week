@@ -230,7 +230,6 @@ def calculate_accuracy_metrics(original, filled):
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
 def plot_results(data_before, data_filled, data_deleted):
-    # เลือกคอลัมน์ที่จะใช้ในกราฟ
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
         'ข้อมูลเดิม': data_before['wl_up']
@@ -238,7 +237,7 @@ def plot_results(data_before, data_filled, data_deleted):
 
     data_after_filled = pd.DataFrame({
         'วันที่': data_filled['datetime'],
-        'ข้อมูลหลังเติมค่า': data_filled['wl_up2']  # ใช้ wl_up2 ในการแสดงกราฟ
+        'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
     })
 
     data_after_deleted = pd.DataFrame({
@@ -258,7 +257,7 @@ def plot_results(data_before, data_filled, data_deleted):
     ).mark_line().encode(
         x='วันที่:T',
         y=alt.Y('ระดับน้ำ:Q', scale=alt.Scale(domain=[min_y, max_y])),
-        color=alt.Color('ข้อมูล:N', scale=alt.Scale(scheme='reds'), legend=alt.Legend(orient='right', title='ข้อมูล'))  # ปรับตำแหน่ง Legend ไปทางขวา
+        color=alt.Color('ข้อมูล:N', scale=alt.Scale(scheme='reds'), legend=alt.Legend(orient='right', title='ข้อมูล'))
     ).properties(
         height=400
     ).interactive()
@@ -266,9 +265,8 @@ def plot_results(data_before, data_filled, data_deleted):
     st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
     st.altair_chart(chart, use_container_width=True)
 
-    # สำหรับการแสดงตาราง เราไม่ต้องการแสดง wl_up2
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled[['code', 'datetime', 'wl_up', 'wl_forecast', 'rf_15m', 'timestamp']]  # ไม่แสดง wl_up2
+    data_filled_selected = data_filled[['code', 'datetime', 'wl_up', 'wl_forecast', 'rf_15m', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
     # เรียกฟังก์ชันคำนวณค่าความแม่นยำ
@@ -321,11 +319,9 @@ st.markdown("---")
 with st.sidebar:
     st.header("อัปโหลดไฟล์ CSV")
     
-    with st.sidebar.expander("เลือกไฟล์สถานีที่จะทำนาย", expanded=False):
-        uploaded_file = st.file_uploader("", type="csv", key="uploader1")
-
-    with st.sidebar.expander("เลือกไฟล์สถานีอื่น", expanded=False):
-        uploaded_file2 = st.file_uploader("", type="csv", key="uploader2")
+    with st.sidebar.expander("อัปโหลดข้อมูลสถานีวัดระดับน้ำ", expanded=False):
+        uploaded_file = st.file_uploader("สถานีที่ต้องการเติมค่า", type="csv", key="uploader1")
+        uploaded_file2 = st.file_uploader("สถานีที่ใช้ฝึกโมเดล", type="csv", key="uploader2")
 
     # เลือกช่วงวันที่ใน sidebar
     st.header("เลือกช่วงที่ต้องการข้อมูล")
