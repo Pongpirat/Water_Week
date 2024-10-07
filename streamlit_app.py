@@ -364,7 +364,7 @@ def plot_data_preview(data1, data2, total_time_lag):
             y=alt.Y('สถานีที่ต้องการเติมค่า:Q', scale=alt.Scale(domain=[min_y, max_y])),
             tooltip=['วันที่', 'สถานีที่ต้องการเติมค่า']
         ).properties(
-            height=400,
+            height=450,
             title='ข้อมูลสถานี'
         ).interactive()
 
