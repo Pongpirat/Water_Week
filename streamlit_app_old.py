@@ -2,34 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import RandomizedSearchCV, train_test_split, TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV
 import altair as alt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 def load_data(file):
-    message_placeholder = st.empty()  # สร้างตำแหน่งที่ว่างสำหรับข้อความแจ้งเตือน
-    if file is None:
-        st.error("ไม่มีไฟล์ที่อัปโหลด กรุณาอัปโหลดไฟล์ CSV")
-        return None
-    
-    try:
-        df = pd.read_csv(file)
-        if df.empty:
-            st.error("ไฟล์ CSV ว่างเปล่า กรุณาอัปโหลดไฟล์ที่มีข้อมูล")
-            return None
-        message_placeholder.success("ไฟล์ถูกโหลดเรียบร้อยแล้ว")  # แสดงข้อความในตำแหน่งที่ว่าง
-        return df
-    except pd.errors.EmptyDataError:
-        st.error("ไม่สามารถอ่านข้อมูลจากไฟล์ได้ ไฟล์อาจว่างเปล่าหรือไม่ใช่ไฟล์ CSV ที่ถูกต้อง")
-        return None
-    except pd.errors.ParserError:
-        st.error("เกิดข้อผิดพลาดในการแยกวิเคราะห์ไฟล์ CSV กรุณาตรวจสอบรูปแบบของไฟล์")
-        return None
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
-        return None
-    finally:
-        message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
+    return pd.read_csv(file)
 
 def clean_data(df):
     data_clean = df.copy()
@@ -59,62 +37,27 @@ def prepare_features(data_clean):
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
-        'days_in_month', 'wl_up_prev'
+        'days_in_month'
     ]
     X = data_clean[feature_cols]
     y = data_clean['wl_up']
     return X, y
 
-def train_and_evaluate_model(X, y):
-    # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # ฝึกโมเดลด้วยชุดฝึก
-    model = train_model(X_train, y_train)
-
-    # ทำนายค่าด้วยชุดทดสอบ
-    y_pred = model.predict(X_test)
-
-    # คำนวณค่าความแม่นยำ
-    mse = mean_squared_error(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-
-    # แสดงผลค่าความแม่นยำ
-    st.header("ผลค่าความแม่นยำบนชุดทดสอบ", divider='gray')
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="MSE (Test Set)", value=f"{mse:.4f}")
-    with col2:
-        st.metric(label="MAE (Test Set)", value=f"{mae:.4f}")
-    with col3:
-        st.metric(label="R² (Test Set)", value=f"{r2:.4f}")
-
-    return model
-
 def train_model(X_train, y_train):
     param_distributions = {
-        'n_estimators': [100, 200, 500],
-        'max_depth': [None, 10, 20],
-        'min_samples_split': [2, 5],
-        'min_samples_leaf': [1, 2],
-        'max_features': ['auto', 'sqrt'],
-        'bootstrap': [True, False]
+        'n_estimators': [100, 200, 500, 1000],  # ขยายช่วงของ n_estimators
+        'max_depth': [None, 10, 20, 50],  # ปรับ max_depth ให้กว้างขึ้น
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['auto', 'sqrt', 'log2'],
+        'bootstrap': [True, False],  # ทดสอบการใช้ข้อมูลทั้งหมดในแต่ละต้นไม้หรือบางส่วน
+        'max_samples': [None, 0.8, 0.9]  # กำหนด max_samples เพื่อสุ่มตัวอย่างในแต่ละต้นไม้
     }
 
     rf = RandomForestRegressor(random_state=42)
 
-    tscv = TimeSeriesSplit(n_splits=5)
-    random_search = RandomizedSearchCV(
-        estimator=rf,
-        param_distributions=param_distributions,
-        n_iter=20,
-        cv=tscv,
-        n_jobs=-1,
-        verbose=2,
-        random_state=42,
-        scoring='neg_mean_absolute_error'
-    )
+    n_splits = min(3, len(X_train) // 2)
+    random_search = RandomizedSearchCV(estimator=rf, param_distributions=param_distributions, n_iter=20, cv=n_splits, n_jobs=-1, verbose=2, random_state=42)
     random_search.fit(X_train, y_train)
 
     return random_search.best_estimator_
@@ -126,8 +69,7 @@ def generate_missing_dates(data):
     return data_with_all_dates
 
 def fill_code_column(data):
-    if 'code' in data.columns:
-        data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
+    data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
     return data
 
 def smooth_filled_values(data_with_all_dates, window_size=3):
@@ -138,10 +80,10 @@ def smooth_filled_values(data_with_all_dates, window_size=3):
 
 def handle_missing_values_by_week(data_clean, start_date, end_date):
     feature_cols = ['year', 'month', 'day', 'hour', 'minute',
-                    'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month', 'wl_up_prev']
+                    'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month']
 
     data = data_clean.copy()
-
+    
     # Convert start_date and end_date to datetime
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
@@ -155,11 +97,9 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
-    # เติมค่า missing ใน wl_up_prev
-    if 'wl_up_prev' in data_with_all_dates.columns:
-        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
-    else:
-        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
+    # เพิ่มคอลัมน์ timestamp และ wl_forecast
+    data_with_all_dates['timestamp'] = pd.NaT  # กำหนดค่าเริ่มต้นเป็น NaT (Not a Timestamp)
+    data_with_all_dates['wl_forecast'] = np.nan  # สร้างคอลัมน์สำหรับเก็บค่าที่ถูกเติม
 
     if len(data_missing) == 0:
         st.write("No missing values to predict.")
@@ -195,7 +135,7 @@ def handle_missing_values_by_week(data_clean, start_date, end_date):
             for idx, row in group.iterrows():
                 X_missing = row[feature_cols].values.reshape(1, -1)
                 predicted_value = model_week.predict(X_missing)
-
+                
                 # บันทึกค่าที่เติมในคอลัมน์ wl_forecast และ timestamp
                 data_with_all_dates.loc[idx, 'wl_forecast'] = predicted_value
                 data_with_all_dates.loc[idx, 'timestamp'] = pd.Timestamp.now()
@@ -267,19 +207,25 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     return data
 
 def calculate_accuracy_metrics(original, filled):
+    # ผสานข้อมูลโดยใช้ datetime เป็นพื้นฐาน โดยจะใช้ wl_up จาก original และ wl_up2 จาก filled
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
-
+    
+    # คำนวณค่าความแม่นยำจาก wl_up ของ original และ wl_up2 ของ filled
     mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
     mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
 
+    # แสดงค่าความแม่นยำบนหน้าจอ
     st.header("ผลค่าความแม่นยำ", divider='gray')
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
+
     with col1:
         st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
+
     with col2:
         st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f}")
+
     with col3:
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
@@ -320,64 +266,40 @@ def plot_results(data_before, data_filled, data_deleted):
     st.altair_chart(chart, use_container_width=True)
 
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    data_filled_selected = data_filled[['code', 'datetime', 'wl_up', 'wl_forecast', 'rf_15m', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
     # เรียกฟังก์ชันคำนวณค่าความแม่นยำ
     calculate_accuracy_metrics(data_before, data_filled)
 
-def plot_data_preview(data1, data2, total_time_lag):
+def plot_data_preview(data1, data2):
     data_pre1 = pd.DataFrame({
         'วันที่': data1['datetime'],
         'สถานีที่ต้องการเติมค่า': data1['wl_up']
     })
 
-    if data2 is not None:
-        data_pre2 = pd.DataFrame({
-            'วันที่': data2['datetime'] + total_time_lag,  # ขยับวันที่ของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
-            'สถานีก่อนหน้า': data2['wl_up']
-        })
-        combined_data_pre = pd.merge(data_pre1, data_pre2, on='วันที่', how='outer')
-        min_y = combined_data_pre[['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า']].min().min()
-        max_y = combined_data_pre[['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า']].max().max()
+    data_pre2 = pd.DataFrame({
+        'วันที่': data2['datetime'],
+        'สถานีก่อนหน้า': data2['wl_up']
+    })
 
-        chart = alt.Chart(combined_data_pre).transform_fold(
-            ['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า'],
-            as_=['ข้อมูล', 'ระดับน้ำ']
-        ).mark_line().encode(
-            x='วันที่:T',
-            y=alt.Y('ระดับน้ำ:Q', scale=alt.Scale(domain=[min_y, max_y])),
-            color=alt.Color('ข้อมูล:N', scale=alt.Scale(scheme='reds'), legend=alt.Legend(orient='right', title='ข้อมูล'))
-        ).properties(
-            height=400,
-            title='ข้อมูลจากทั้งสองสถานี'
-        ).interactive()
+    combined_data_pre = pd.merge(data_pre1, data_pre2, on='วันที่', how='outer')
+    min_y = combined_data_pre[['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า']].min().min()
+    max_y = combined_data_pre[['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า']].max().max()
 
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        # ถ้าไม่มีไฟล์ที่สอง ให้แสดงกราฟของไฟล์แรกเท่านั้น
-        min_y = data_pre1['สถานีที่ต้องการเติมค่า'].min()
-        max_y = data_pre1['สถานีที่ต้องการเติมค่า'].max()
+    chart = alt.Chart(combined_data_pre).transform_fold(
+        ['สถานีที่ต้องการเติมค่า', 'สถานีก่อนหน้า'],
+        as_=['ข้อมูล', 'ระดับน้ำ']
+    ).mark_line().encode(
+        x='วันที่:T',
+        y=alt.Y('ระดับน้ำ:Q', scale=alt.Scale(domain=[min_y, max_y])),
+        color=alt.Color('ข้อมูล:N', scale=alt.Scale(scheme='reds'), legend=alt.Legend(orient='right', title='ข้อมูล'))  # ใช้พาเลต magma และปรับตำแหน่ง Legend ไปทางขวา
+    ).properties(
+        height=400,
+        title='ข้อมูลสถานี'
+    ).interactive()
 
-        chart = alt.Chart(data_pre1).mark_line(color='#e13128').encode(
-            x='วันที่:T',
-            y=alt.Y('สถานีที่ต้องการเติมค่า:Q', scale=alt.Scale(domain=[min_y, max_y])),
-            tooltip=['วันที่', 'สถานีที่ต้องการเติมค่า']
-        ).properties(
-            height=400,
-            title='ข้อมูลสถานี'
-        ).interactive()
-
-        st.altair_chart(chart, use_container_width=True)
-
-def merge_data(df1, df2=None):
-    if df2 is not None:
-        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_prev'))
-    else:
-        # ถ้าไม่มี df2 ให้สร้างคอลัมน์ 'wl_up_prev' จาก 'wl_up' ของ df1 (shifted by 1)
-        df1['wl_up_prev'] = df1['wl_up'].shift(1)
-        merged_df = df1.copy()
-    return merged_df
+    st.altair_chart(chart, use_container_width=True)
 
 # Streamlit UI
 st.set_page_config(
@@ -389,34 +311,17 @@ st.set_page_config(
 # การจัดการข้อมูลระดับน้ำด้วย Random Forest
 แอป Streamlit สำหรับจัดการข้อมูลระดับน้ำ โดยใช้โมเดล Random Forest เพื่อเติมค่าที่ขาดหายไป 
 ข้อมูลถูกประมวลผลและแสดงผลผ่านกราฟและการวัดค่าความแม่นยำ ผู้ใช้สามารถเลือกอัปโหลดไฟล์, 
-กำหนดช่วงเวลาลบข้อมูล และดูผลลัพธ์ของการเติมค่าได้
+กำหนดช่วงเวลาลบข้อมูล, และดูผลลัพธ์ของการเติมค่าได้
 '''
 st.markdown("---")
 
 # Sidebar: Upload files and choose date ranges
 with st.sidebar:
-    st.header("การตั้งค่า")
-
-    # เพิ่มตัวเลือกว่าจะใช้ไฟล์ที่สองหรือไม่
-    use_second_file = st.checkbox("ต้องการใช้สถานีใกล้เคียงในการฝึกและเติมค่าที่ขาดหาย", value=False)
-    st.markdown("---")
-
     st.header("อัปโหลดไฟล์ CSV")
     
     with st.sidebar.expander("อัปโหลดข้อมูลสถานีวัดระดับน้ำ", expanded=False):
         uploaded_file = st.file_uploader("สถานีที่ต้องการเติมค่า", type="csv", key="uploader1")
-        if use_second_file:
-            uploaded_file2 = st.file_uploader("สถานีที่ใช้ฝึกโมเดล", type="csv", key="uploader2")
-        else:
-            uploaded_file2 = None  # กำหนดให้เป็น None ถ้าไม่ใช้ไฟล์ที่สอง
-
-    # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี ถ้าใช้ไฟล์ที่สอง
-    if use_second_file:
-        st.header("ระบุเวลาห่างระหว่างสถานี")
-        time_lag_days = st.number_input("ระยะห่าง (วัน)", value=0, min_value=0)
-        total_time_lag = pd.Timedelta(days=time_lag_days)
-    else:
-        total_time_lag = pd.Timedelta(days=0)
+        uploaded_file2 = st.file_uploader("สถานีที่ใช้ฝึกโมเดล", type="csv", key="uploader2")
 
     # เลือกช่วงวันที่ใน sidebar
     st.header("เลือกช่วงที่ต้องการข้อมูล")
@@ -437,91 +342,56 @@ with st.sidebar:
     process_button = st.button("ประมวลผล")
 
 # Main content: Display results after file uploads and date selection
-if uploaded_file:
+if uploaded_file and uploaded_file2:
     df = load_data(uploaded_file)
-    
-    if df is not None:
-        df_pre = clean_data(df)
-        df_pre = generate_missing_dates(df_pre)
+    df_pre = clean_data(df)
 
-        # ถ้าเลือกใช้ไฟล์ที่สอง
-        if use_second_file:
-            if uploaded_file2 is not None:
-                df2 = load_data(uploaded_file2)
-                if df2 is not None:
-                    df2_pre = clean_data(df2)
-                    df2_pre = generate_missing_dates(df2_pre)
-                else:
-                    df2_pre = None
-            else:
-                st.warning("กรุณาอัปโหลดไฟล์ที่สอง (สถานีที่ก่อนหน้า)")
-                df2_pre = None
+    df2 = load_data(uploaded_file2)
+    df2_pre = clean_data(df2)
+
+    plot_data_preview(df_pre, df2_pre)
+
+    if process_button:
+        processing_placeholder = st.empty()
+        processing_placeholder.text("กำลังประมวลผลข้อมูล...")
+
+        df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
+
+        # ปรับค่า end_date เฉพาะถ้าเลือกช่วงเวลาแล้ว
+        end_date = end_date + pd.DateOffset(days=1)
+
+        # กรองข้อมูลตามช่วงวันที่เลือก
+        df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date))]
+
+        # Clean data
+        df_clean = clean_data(df_filtered)
+
+        # ตรวจสอบว่าผู้ใช้เลือกที่จะลบข้อมูลหรือไม่
+        if delete_data_option:
+            delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
+            delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}")
+            df_deleted = delete_data_by_date_range(df_clean, delete_start_datetime, delete_end_datetime)
         else:
-            df2_pre = None
+            df_deleted = df_clean.copy()  # ถ้าไม่เลือกลบก็ใช้ข้อมูลเดิมแทน
 
-        # แสดงกราฟตัวอย่าง
-        plot_data_preview(df_pre, df2_pre, total_time_lag)
+        # Generate all dates
+        df_clean = generate_missing_dates(df_clean)
 
-        if process_button:
-            processing_placeholder = st.empty()
-            processing_placeholder.text("กำลังประมวลผลข้อมูล...")
+        # Fill NaN values in 'code' column
+        df_clean = fill_code_column(df_clean)
 
-            df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
+        # Create time features
+        df_clean = create_time_features(df_clean)
 
-            # ปรับค่า end_date เฉพาะถ้าเลือกช่วงเวลาแล้ว
-            end_date_dt = pd.to_datetime(end_date) + pd.DateOffset(days=1)
+        # เก็บข้อมูลก่อนการสุ่มลบ
+        df_before_random_deletion = df_filtered.copy()
 
-            # กรองข้อมูลตามช่วงวันที่เลือก
-            df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))]
+        # Handle missing values by week
+        df_handled = handle_missing_values_by_week(df_clean, start_date, end_date)
 
-            if use_second_file and uploaded_file2 and df2 is not None:
-                # ปรับเวลาของสถานีก่อนหน้าตามเวลาห่างที่ระบุ
-                df2['datetime'] = pd.to_datetime(df2['datetime']).dt.tz_localize(None)
-                df2_filtered = df2[(df2['datetime'] >= pd.to_datetime(start_date)) & (df2['datetime'] <= pd.to_datetime(end_date_dt))]
-                df2_filtered['datetime'] = df2_filtered['datetime'] + total_time_lag
-                df2_clean = clean_data(df2_filtered)
-            else:
-                df2_clean = None
+        # Remove the processing message after the processing is complete
+        processing_placeholder.empty()
 
-            # Clean data
-            df_clean = clean_data(df_filtered)
-
-            # รวมข้อมูลจากทั้งสองสถานี ถ้ามี
-            df_merged = merge_data(df_clean, df2_clean)
-
-            # ตรวจสอบว่าผู้ใช้เลือกที่จะลบข้อมูลหรือไม่
-            if delete_data_option:
-                delete_start_datetime = pd.to_datetime(f"{delete_start_date} {delete_start_time}")
-                delete_end_datetime = pd.to_datetime(f"{delete_end_date} {delete_end_time}")
-                df_deleted = delete_data_by_date_range(df_merged, delete_start_datetime, delete_end_datetime)
-            else:
-                df_deleted = df_merged.copy()  # ถ้าไม่เลือกลบก็ใช้ข้อมูลเดิมแทน
-
-            # Generate all dates
-            df_clean = generate_missing_dates(df_deleted)
-
-            # Fill NaN values in 'code' column
-            df_clean = fill_code_column(df_clean)
-
-            # Create time features
-            df_clean = create_time_features(df_clean)
-
-            # เติมค่า missing ใน 'wl_up_prev'
-            if 'wl_up_prev' not in df_clean.columns:
-                df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
-            df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
-
-            # เก็บข้อมูลก่อนการลบ
-            df_before_deletion = df_filtered.copy()
-
-            # Handle missing values by week
-            df_handled = handle_missing_values_by_week(df_clean, start_date, end_date)
-
-            # Remove the processing message after the processing is complete
-            processing_placeholder.empty()
-
-            # Plot the results using Streamlit's line chart
-            plot_results(df_before_deletion, df_handled, df_deleted)
+        # Plot the results using Streamlit's line chart
+        plot_results(df_before_random_deletion, df_handled, df_deleted)
     st.markdown("---")
-else:
-    st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผล")
