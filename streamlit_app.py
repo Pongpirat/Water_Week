@@ -267,15 +267,20 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     return data
 
 def calculate_accuracy_metrics(original, filled):
+    # ผสานข้อมูลตาม datetime
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
 
+    # ลบข้อมูลที่มี NaN ออก
+    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
+
+    # คำนวณค่าความแม่นยำ
     mse = mean_squared_error(merged_data['wl_up'], merged_data['wl_up2'])
     mae = mean_absolute_error(merged_data['wl_up'], merged_data['wl_up2'])
     r2 = r2_score(merged_data['wl_up'], merged_data['wl_up2'])
 
     st.header("ผลค่าความแม่นยำ", divider='gray')
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(label="Mean Squared Error (MSE)", value=f"{mse:.4f}")
     with col2:
@@ -395,46 +400,40 @@ st.markdown("---")
 
 # Sidebar: Upload files and choose date ranges
 with st.sidebar:
-    st.header("การตั้งค่า")
 
-    # เพิ่มตัวเลือกว่าจะใช้ไฟล์ที่สองหรือไม่
-    use_second_file = st.checkbox("ต้องการใช้สถานีใกล้เคียงในการฝึกและเติมค่าที่ขาดหาย", value=False)
-    st.markdown("---")
-
-    st.header("อัปโหลดไฟล์ CSV")
-    
-    with st.sidebar.expander("อัปโหลดข้อมูลสถานีวัดระดับน้ำ", expanded=False):
+    st.sidebar.title("ตั้งค่าข้อมูล")
+    with st.sidebar.expander("อัปโหลดข้อมูล", expanded=False):
+        use_second_file = st.checkbox("ต้องการใช้สถานีใกล้เคียง", value=False)
         uploaded_file = st.file_uploader("สถานีที่ต้องการเติมค่า", type="csv", key="uploader1")
         if use_second_file:
             uploaded_file2 = st.file_uploader("สถานีที่ใช้ฝึกโมเดล", type="csv", key="uploader2")
         else:
             uploaded_file2 = None  # กำหนดให้เป็น None ถ้าไม่ใช้ไฟล์ที่สอง
 
-    # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี ถ้าใช้ไฟล์ที่สอง
-    if use_second_file:
-        st.header("ระบุเวลาห่างระหว่างสถานี")
-        time_lag_days = st.number_input("ระยะห่าง (วัน)", value=0, min_value=0)
-        total_time_lag = pd.Timedelta(days=time_lag_days)
-    else:
-        total_time_lag = pd.Timedelta(days=0)
+        # เพิ่มช่องกรอกเวลาห่างระหว่างสถานี ถ้าใช้ไฟล์ที่สอง
+        if use_second_file:
+            time_lag_days = st.number_input("ระบุเวลาห่างระหว่างสถานี (วัน)", value=0, min_value=0)
+            total_time_lag = pd.Timedelta(days=time_lag_days)
+        else:
+            total_time_lag = pd.Timedelta(days=0)
 
     # เลือกช่วงวันที่ใน sidebar
-    st.header("เลือกช่วงที่ต้องการข้อมูล")
-    start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-05-01"))
-    end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-05-31"))
-    
-    # เพิ่มตัวเลือกว่าจะลบข้อมูลหรือไม่
-    delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
+    with st.sidebar.expander("เลือกช่วงที่ต้องการข้อมูล", expanded=False):
+        start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-05-01"))
+        end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-05-31"))
+        
+        # เพิ่มตัวเลือกว่าจะลบข้อมูลหรือไม่
+        delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
 
-    if delete_data_option:
-        # แสดงช่องกรอกข้อมูลสำหรับการลบข้อมูลเมื่อผู้ใช้ติ๊กเลือก
-        st.header("เลือกช่วงที่ต้องการลบข้อมูล")
-        delete_start_date = st.date_input("กำหนดเริ่มต้นลบข้อมูล", value=start_date, key='delete_start')
-        delete_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='delete_start_time')
-        delete_end_date = st.date_input("กำหนดสิ้นสุดลบข้อมูล", value=end_date, key='delete_end')
-        delete_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time(), key='delete_end_time')
+        if delete_data_option:
+            # แสดงช่องกรอกข้อมูลสำหรับการลบข้อมูลเมื่อผู้ใช้ติ๊กเลือก
+            st.header("เลือกช่วงที่ต้องการลบข้อมูล")
+            delete_start_date = st.date_input("กำหนดเริ่มต้นลบข้อมูล", value=start_date, key='delete_start')
+            delete_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='delete_start_time')
+            delete_end_date = st.date_input("กำหนดสิ้นสุดลบข้อมูล", value=end_date, key='delete_end')
+            delete_end_time = st.time_input("เวลาสิ้นสุด", value=pd.Timestamp("23:45:00").time(), key='delete_end_time')
 
-    process_button = st.button("ประมวลผล")
+    process_button = st.button("ประมวลผล", type="primary")
 
 # Main content: Display results after file uploads and date selection
 if uploaded_file:
