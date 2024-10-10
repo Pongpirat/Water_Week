@@ -824,7 +824,7 @@ elif model_choice == "Linear Regression":
                                     )
 
                                 if not forecasted_data.empty:
-                                    st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
+                                    st.header("กราฟข้อมูลพร้อมการพยากรณ์", divider='gray')
                                     st.plotly_chart(plot_data_combined(selected_data.set_index('datetime'), forecasted_data, label='สถานีที่ต้องการทำนาย'))
 
                                     # ตรวจสอบและคำนวณค่าความแม่นยำ
@@ -834,7 +834,7 @@ elif model_choice == "Linear Regression":
                                     )
 
                                     if actual_forecasted_data is not None:
-                                        st.subheader('ตารางข้อมูลเปรียบเทียบ')
+                                        st.header("ตารางข้อมูลเปรียบเทียบ", divider='gray')
                                         comparison_table = pd.DataFrame({
                                             'datetime': actual_forecasted_data['datetime'],
                                             'wl_up': actual_forecasted_data['Actual'],
