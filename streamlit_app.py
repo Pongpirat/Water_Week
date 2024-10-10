@@ -228,21 +228,7 @@ def calculate_accuracy_metrics(original, filled):
     with col3:
         st.metric(label="R-squared (R²)", value=f"{r2:.4f}")
 
-def is_dark_mode():
-    return st.get_option("theme.base") == "dark"
-
 def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
-    dark_mode = is_dark_mode()
-
-    # เลือก template ตามธีม
-    plotly_template = 'plotly_dark' if dark_mode else 'plotly_white'
-
-    # เลือกชุดสีที่เหมาะสมกับธีม
-    if dark_mode:
-        color_sequence = px.colors.sequential.Turbo[10:15]
-    else:
-        color_sequence = px.colors.qualitative.Plotly
-    
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
         'ข้อมูลเดิม': data_before['wl_up']
@@ -276,7 +262,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     # Plot ด้วย Plotly
     fig = px.line(combined_data, x='วันที่', y=y_columns,
                   labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  template=plotly_template, color_discrete_sequence=color_sequence)
+                  color_discrete_sequence=px.colors.sequential.Turbo[10:15])
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
@@ -300,17 +286,6 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         calculate_accuracy_metrics(data_before, data_filled)
 
 def plot_data_preview(df_pre, df2_pre, total_time_lag):
-    dark_mode = is_dark_mode()
-
-    # เลือก template ตามธีม
-    plotly_template = 'plotly_dark' if dark_mode else 'plotly_white'
-
-    # เลือกชุดสีที่เหมาะสมกับธีม
-    if dark_mode:
-        color_sequence = px.colors.sequential.YlOrRd[2:7][::-1]
-    else:
-        color_sequence = px.colors.qualitative.Plotly
-
     data_pre1 = pd.DataFrame({
         'datetime': df_pre['datetime'],
         'สถานีที่ต้องการทำนาย': df_pre['wl_up']
@@ -330,8 +305,7 @@ def plot_data_preview(df_pre, df2_pre, total_time_lag):
             y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
             labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
             title='ข้อมูลจากทั้งสองสถานี',
-            template=plotly_template,
-            color_discrete_sequence=color_sequence
+            color_discrete_sequence=px.colors.sequential.YlOrRd[2:7][::-1]
         )
 
         fig.update_layout(
@@ -350,8 +324,7 @@ def plot_data_preview(df_pre, df2_pre, total_time_lag):
             y='สถานีที่ต้องการทำนาย',
             labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
             title='ข้อมูลสถานีที่ต้องการทำนาย',
-            template=plotly_template,
-            color_discrete_sequence=color_sequence
+            color_discrete_sequence=px.colors.sequential.YlOrRd[2:7][::-1]
         )
 
         fig.update_layout(
