@@ -34,12 +34,43 @@ def load_data(file):
     finally:
         message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
 
+def fix_outliers_based_on_neighbors(data, threshold=0.5, decimal_threshold=0.01):
+    # คำนวณค่าเฉลี่ยระหว่างค่าแถวก่อนหน้าและแถวถัดไป
+    data['avg_neighbors'] = (data['wl_up'].shift(1) + data['wl_up'].shift(-1)) / 2
+    
+    # คำนวณความแตกต่างระหว่างค่าปัจจุบันกับค่าเฉลี่ยของแถวข้างเคียง
+    data['diff_avg'] = (data['wl_up'] - data['avg_neighbors']).abs()
+    
+    # ระบุแถวที่เป็น outlier โดยอิงตาม threshold ทั่วไป
+    large_outlier_condition = data['diff_avg'] > threshold
+    
+    # ระบุแถวที่เป็น outlier โดยอิงตามความแตกต่างเล็กน้อย (decimal threshold)
+    small_outlier_condition = (data['diff_avg'] > decimal_threshold) & (data['diff_avg'] <= threshold)
+    
+    # รวมเงื่อนไขการตรวจจับ outlier
+    outlier_condition = large_outlier_condition | small_outlier_condition
+    
+    # ตั้งค่า NaN สำหรับค่า wl_up ที่เป็น outlier
+    data.loc[outlier_condition, 'wl_up'] = np.nan
+    
+    # ใช้ interpolation เพื่อเติมค่าที่เป็น NaN
+    data['wl_up'] = data['wl_up'].interpolate(method='linear')
+    
+    # ลบคอลัมน์ที่ไม่ต้องการหลังจากการประมวลผล
+    data.drop(columns=['avg_neighbors', 'diff_avg'], inplace=True)
+    
+    return data
+
 def clean_data(df):
     data_clean = df.copy()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
     data_clean = data_clean.dropna(subset=['datetime'])
-    data_clean = data_clean[(data_clean['wl_up'] >= 100)]
+    data_clean = data_clean[(data_clean['wl_up'] >= -100)]
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
+    
+    # เรียกใช้ฟังก์ชันเพื่อจัดการกับค่า outliers ตามค่าเฉลี่ยของแถวข้างเคียง
+    data_clean = fix_outliers_based_on_neighbors(data_clean)
+    
     return data_clean
 
 def create_time_features(data_clean):
@@ -262,7 +293,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     # Plot ด้วย Plotly
     fig = px.line(combined_data, x='วันที่', y=y_columns,
                   labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  color_discrete_sequence=px.colors.sequential.Turbo[10:15])
+                  color_discrete_sequence=px.colors.qualitative.Plotly)
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
@@ -305,7 +336,7 @@ def plot_data_preview(df_pre, df2_pre, total_time_lag):
             y=['สถานีที่ต้องการทำนาย', 'สถานีก่อนหน้า'],
             labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
             title='ข้อมูลจากทั้งสองสถานี',
-            color_discrete_sequence=px.colors.sequential.YlOrRd[2:7][::-1]
+            color_discrete_sequence=px.colors.qualitative.Plotly
         )
 
         fig.update_layout(
@@ -324,7 +355,7 @@ def plot_data_preview(df_pre, df2_pre, total_time_lag):
             y='สถานีที่ต้องการทำนาย',
             labels={'สถานีที่ต้องการทำนาย': 'ระดับน้ำ (wl_up)'},
             title='ข้อมูลสถานีที่ต้องการทำนาย',
-            color_discrete_sequence=px.colors.sequential.YlOrRd[2:7][::-1]
+            color_discrete_sequence=px.colors.qualitative.Plotly
         )
 
         fig.update_layout(
@@ -694,8 +725,11 @@ if model_choice == "Random Forest":
                     else:
                         df2_clean = None
 
-                    # Clean data
+                    # ทำความสะอาดข้อมูลหลัก
                     df_clean = clean_data(df_filtered)
+
+                    # **เก็บข้อมูลหลังการทำความสะอาดแต่ก่อนการรวมข้อมูล**
+                    df_before_deletion = df_clean.copy()
 
                     # รวมข้อมูลจากทั้งสองสถานี ถ้ามี
                     df_merged = merge_data(df_clean, df2_clean)
@@ -722,8 +756,8 @@ if model_choice == "Random Forest":
                         df_clean['wl_up_prev'] = df_clean['wl_up'].shift(1)
                     df_clean['wl_up_prev'] = df_clean['wl_up_prev'].interpolate(method='linear')
 
-                    # เก็บข้อมูลก่อนการลบ
-                    df_before_deletion = df_filtered.copy()
+                    # **สามารถลบหรือปรับส่วนนี้ได้ถ้าไม่ต้องการใช้ df_before_deletion = df_filtered.copy() อีกต่อไป**
+                    # df_before_deletion = df_filtered.copy()
 
                     # Handle missing values by week
                     df_handled = handle_missing_values_by_week(df_clean, start_date, end_date, model_type='random_forest')
@@ -737,7 +771,7 @@ if model_choice == "Random Forest":
         st.markdown("---")
 
     else:
-        st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผล")
+        st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Random Forest")
 elif model_choice == "Linear Regression":
     if uploaded_fill_file:
         # โหลดข้อมูลของสถานีที่ต้องการทำนาย
@@ -842,11 +876,15 @@ elif model_choice == "Linear Regression":
                                         })
                                         st.dataframe(comparison_table, use_container_width=True)
 
-                                        st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                                        st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                                        st.header("ผลค่าความแม่นยำ", divider='gray')
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.2f}")
+                                        with col2:
+                                            st.metric(label="Root Mean Squared Error (RMSE)", value=f"{rmse:.2f}")
                                     else:
                                         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                                 else:
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
-        st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
+        st.info("กรุณาอัปโหลดไฟล์ CSV เพื่อเริ่มต้นการประมวลผลด้วย Linear Regression")
