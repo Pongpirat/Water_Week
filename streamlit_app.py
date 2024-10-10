@@ -785,13 +785,13 @@ elif model_choice == "Linear Regression":
                 else:
                     upstream_df = None
 
-                # แสดงกราฟข้อมูล
-                st.subheader('กราฟข้อมูลระดับน้ำ')
-                st.plotly_chart(plot_data_combined(target_df.set_index('datetime'), label='สถานีที่ต้องการทำนาย'))
-                if upstream_df is not None and not upstream_df.empty:
-                    st.plotly_chart(plot_data_combined(upstream_df.set_index('datetime'), label='สถานีใกล้เคียง (up)'))
+                # แสดงกราฟข้อมูลจากทั้งสองสถานี
+                if use_upstream and upstream_df is not None:
+                    # ใช้ฟังก์ชัน plot_data_preview เพื่อแสดงกราฟข้อมูลทั้งสองสถานี
+                    plot_data_preview(target_df, upstream_df, pd.Timedelta(hours=delay_hours))
                 else:
-                    st.info("ไม่มีข้อมูลสถานีใกล้เคียง")
+                    # แสดงเฉพาะกราฟของสถานีที่ต้องการทำนาย หากไม่มีสถานีใกล้เคียง
+                    plot_data_preview(target_df, None, pd.Timedelta(hours=0))
 
                 if process_button2:
                     with st.spinner("กำลังพยากรณ์..."):
@@ -850,4 +850,3 @@ elif model_choice == "Linear Regression":
                                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
     else:
         st.info("กรุณาอัปโหลดไฟล์ CSV สำหรับเติมข้อมูล เพื่อเริ่มต้นการพยากรณ์")
-
