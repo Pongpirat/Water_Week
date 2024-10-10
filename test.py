@@ -629,7 +629,7 @@ with st.sidebar:
             if use_upstream:
                 delay_hours = st.number_input("ระบุเวลาห่างระหว่างสถานี (ชั่วโมง)", value=0, min_value=0)
 
-        with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับพยากรณ์", expanded=False):
+        with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
             forecast_start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-06-01"), key='forecast_start_lr')
             forecast_start_time = st.time_input("เวลาเริ่มต้น", value=pd.Timestamp("00:00:00").time(), key='forecast_start_time_lr')
             forecast_end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-06-02"), key='forecast_end_lr')
@@ -836,11 +836,11 @@ elif model_choice == "Linear Regression":
                                     if actual_forecasted_data is not None:
                                         st.subheader('ตารางข้อมูลเปรียบเทียบ')
                                         comparison_table = pd.DataFrame({
-                                            'Datetime': actual_forecasted_data['datetime'],
-                                            'ค่าจริง (ถ้ามี)': actual_forecasted_data['Actual'],
-                                            'ค่าที่พยากรณ์': actual_forecasted_data['Forecasted']
+                                            'datetime': actual_forecasted_data['datetime'],
+                                            'wl_up': actual_forecasted_data['Actual'],
+                                            'wl_forecast': actual_forecasted_data['Forecasted']
                                         })
-                                        st.dataframe(comparison_table)
+                                        st.dataframe(comparison_table, use_container_width=True)
 
                                         st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
                                         st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
