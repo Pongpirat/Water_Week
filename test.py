@@ -34,32 +34,32 @@ def load_data(file):
     finally:
         message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
 
-def fix_outliers_based_on_neighbors(data, threshold=0.5, decimal_threshold=0.01):
-    # คำนวณค่าเฉลี่ยระหว่างค่าแถวก่อนหน้าและแถวถัดไป
-    data['avg_neighbors'] = (data['wl_up'].shift(1) + data['wl_up'].shift(-1)) / 2
+# def fix_outliers_based_on_neighbors(data, threshold=0.5, decimal_threshold=0.01):
+#     # คำนวณค่าเฉลี่ยระหว่างค่าแถวก่อนหน้าและแถวถัดไป
+#     data['avg_neighbors'] = (data['wl_up'].shift(1) + data['wl_up'].shift(-1)) / 2
     
-    # คำนวณความแตกต่างระหว่างค่าปัจจุบันกับค่าเฉลี่ยของแถวข้างเคียง
-    data['diff_avg'] = (data['wl_up'] - data['avg_neighbors']).abs()
+#     # คำนวณความแตกต่างระหว่างค่าปัจจุบันกับค่าเฉลี่ยของแถวข้างเคียง
+#     data['diff_avg'] = (data['wl_up'] - data['avg_neighbors']).abs()
     
-    # ระบุแถวที่เป็น outlier โดยอิงตาม threshold ทั่วไป
-    large_outlier_condition = data['diff_avg'] > threshold
+#     # ระบุแถวที่เป็น outlier โดยอิงตาม threshold ทั่วไป
+#     large_outlier_condition = data['diff_avg'] > threshold
     
-    # ระบุแถวที่เป็น outlier โดยอิงตามความแตกต่างเล็กน้อย (decimal threshold)
-    small_outlier_condition = (data['diff_avg'] > decimal_threshold) & (data['diff_avg'] <= threshold)
+#     # ระบุแถวที่เป็น outlier โดยอิงตามความแตกต่างเล็กน้อย (decimal threshold)
+#     small_outlier_condition = (data['diff_avg'] > decimal_threshold) & (data['diff_avg'] <= threshold)
     
-    # รวมเงื่อนไขการตรวจจับ outlier
-    outlier_condition = large_outlier_condition | small_outlier_condition
+#     # รวมเงื่อนไขการตรวจจับ outlier
+#     outlier_condition = large_outlier_condition | small_outlier_condition
     
-    # ตั้งค่า NaN สำหรับค่า wl_up ที่เป็น outlier
-    data.loc[outlier_condition, 'wl_up'] = np.nan
+#     # ตั้งค่า NaN สำหรับค่า wl_up ที่เป็น outlier
+#     data.loc[outlier_condition, 'wl_up'] = np.nan
     
-    # ใช้ interpolation เพื่อเติมค่าที่เป็น NaN
-    data['wl_up'] = data['wl_up'].interpolate(method='linear')
+#     # ใช้ interpolation เพื่อเติมค่าที่เป็น NaN
+#     data['wl_up'] = data['wl_up'].interpolate(method='linear')
     
-    # ลบคอลัมน์ที่ไม่ต้องการหลังจากการประมวลผล
-    data.drop(columns=['avg_neighbors', 'diff_avg'], inplace=True)
+#     # ลบคอลัมน์ที่ไม่ต้องการหลังจากการประมวลผล
+#     data.drop(columns=['avg_neighbors', 'diff_avg'], inplace=True)
     
-    return data
+#     return data
 
 def clean_data(df):
     data_clean = df.copy()
@@ -69,7 +69,7 @@ def clean_data(df):
     data_clean = data_clean[(data_clean['wl_up'] != 0) & (~data_clean['wl_up'].isna())]
     
     # เรียกใช้ฟังก์ชันเพื่อจัดการกับค่า outliers ตามค่าเฉลี่ยของแถวข้างเคียง
-    data_clean = fix_outliers_based_on_neighbors(data_clean)
+    # data_clean = fix_outliers_based_on_neighbors(data_clean)
     
     return data_clean
 
