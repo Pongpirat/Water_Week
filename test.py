@@ -413,7 +413,7 @@ def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_t
 
     if df3_pre is not None:
         data_pre3 = pd.DataFrame({
-            'datetime': df3_pre['datetime'] + total_time_lag_downstream,  # ขยับวันที่ของสถานีน้ำ Downstream ตามเวลาห่างที่ระบุ
+            'datetime': df3_pre['datetime'] - total_time_lag_downstream,  # ขยับวันที่ของสถานีน้ำ Downstream ตามเวลาห่างที่ระบุ
             'สถานีน้ำ Downstream': df3_pre['wl_up']
         })
         combined_data_pre = pd.merge(combined_data_pre, data_pre3, on='datetime', how='outer')
@@ -888,12 +888,15 @@ if model_choice == "Random Forest":
                     else:
                         df_up_clean = None
 
-                    # ถ้าใช้ Downstream และมีไฟล์ Downstream และ df_down_pre ไม่ใช่ None
+                    # ถ้าเลือกใช้ไฟล์ Downstream
                     if use_downstream and uploaded_down_file and df_down_pre is not None:
                         # ปรับเวลาของสถานี Downstream ตามเวลาห่างที่ระบุ
                         df_down_pre['datetime'] = pd.to_datetime(df_down_pre['datetime']).dt.tz_localize(None)
-                        df_down_filtered = df_down_pre[(df_down_pre['datetime'] >= pd.to_datetime(start_date)) & (df_down_pre['datetime'] <= pd.to_datetime(end_date_dt))]
-                        df_down_filtered['datetime'] = df_down_filtered['datetime'] + total_time_lag_downstream
+                        df_down_filtered = df_down_pre[
+                            (df_down_pre['datetime'] >= pd.to_datetime(start_date)) & 
+                            (df_down_pre['datetime'] <= pd.to_datetime(end_date_dt))
+                        ]
+                        df_down_filtered['datetime'] = df_down_filtered['datetime'] - total_time_lag_downstream  # **ถอยเวลา** แทนการเพิ่ม
                         df_down_clean = clean_data(df_down_filtered)
                     else:
                         df_down_clean = None
