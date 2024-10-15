@@ -72,18 +72,11 @@ def create_time_features(data_clean):
     return data_clean
 
 def create_lag_features(data, lags=[1, 4, 96, 192]):
-    """
-    สร้างฟีเจอร์ lag ตามจำนวนที่ระบุใน lags
-    """
     for lag in lags:
         data[f'lag_{lag}'] = data['wl_up'].shift(lag)
     return data
 
 def create_moving_average_features(data, window=672):
-    """
-    สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
-    window: จำนวนช่วงเวลา (672 ช่วงเวลา 15 นาที = 7 วัน)
-    """
     data[f'ma_{window}'] = data['wl_up'].rolling(window=window, min_periods=1).mean()
     return data
 
@@ -166,6 +159,9 @@ def train_linear_regression_model(X_train, y_train):
 
 # ฟังก์ชันเพิ่มเติมจากโค้ดแรก
 def generate_missing_dates(data):
+    if data['datetime'].isnull().all():
+        st.error("ไม่มีข้อมูลวันที่ในข้อมูลที่ให้มา")
+        st.stop()
     full_date_range = pd.date_range(start=data['datetime'].min(), end=data['datetime'].max(), freq='15T')
     all_dates = pd.DataFrame(full_date_range, columns=['datetime'])
     data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
@@ -191,6 +187,11 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
 
     # Filter data based on the datetime range
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
+
+    # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
+    if data.empty:
+        st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
+        st.stop()
 
     # Generate all missing dates within the selected range
     data_with_all_dates = generate_missing_dates(data)
@@ -878,6 +879,12 @@ if model_choice == "Random Forest":
                     # กรองข้อมูลตามช่วงวันที่เลือก
                     df_filtered = df[(df['datetime'] >= pd.to_datetime(start_date)) & (df['datetime'] <= pd.to_datetime(end_date_dt))]
 
+                    # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
+                    if df_filtered.empty:
+                        st.warning("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
+                        processing_placeholder.empty()
+                        st.stop()
+
                     # ถ้าใช้ Upstream และมีไฟล์ Upstream และ df_up_pre ไม่ใช่ None
                     if use_upstream and uploaded_up_file and df_up_pre is not None:
                         # ปรับเวลาของสถานี Upstream ตามเวลาห่างที่ระบุ
@@ -1014,8 +1021,10 @@ elif model_choice == "Linear Regression":
                                 (merged_training_data_lr['datetime'] <= training_end_datetime_lr)
                             ].copy()
 
+                            # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
                             if training_data_lr.empty:
                                 st.error("ไม่มีข้อมูลในช่วงเวลาที่เลือกสำหรับการฝึกโมเดล")
+                                st.stop()
                             else:
                                 forecast_start_date_actual_lr = training_end_datetime_lr + pd.Timedelta(minutes=15)
                                 forecast_end_date_actual_lr = forecast_start_date_actual_lr + pd.Timedelta(days=forecast_days_lr)
