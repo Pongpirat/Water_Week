@@ -251,17 +251,8 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         return data_with_all_dates
     
     # Train initial model with all available data
-    timearray = []
-    tic = time.time()
     X_train, y_train = prepare_features(data_not_missing)
-    toc = time.time()
-    timearray.append(toc-tic)
-    tic = time.time()
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
-    
-    toc = time.time()
-    timearray.append(toc-tic)
-    st.write(timearray)
     
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
