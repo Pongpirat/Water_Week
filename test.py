@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -71,38 +72,45 @@ def create_time_features(data_clean):
 
     return data_clean
 
-def create_lag_features(data, lags=[1, 4, 96, 192]):
+def create_lag_features(data, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192]):
     for lag in lags:
         data[f'lag_{lag}'] = data['wl_up'].shift(lag)
+    for lead in leads:
+        data[f'lead_{lead}'] = data['wl_up'].shift(-lead)
     return data
 
 def create_moving_average_features(data, window=672):
     data[f'ma_{window}'] = data['wl_up'].rolling(window=window, min_periods=1).mean()
     return data
 
-def prepare_features(data_clean, lags=[1, 4, 96, 192], window=672):
+def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], window=672):
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
         'days_in_month', 'wl_up_prev'
     ]
     
-    # สร้างฟีเจอร์ lag
-    data_clean = create_lag_features(data_clean, lags)
+    # สร้างฟีเจอร์ lag และ lead
+    data_clean = create_lag_features(data_clean, lags=lags, leads=leads)
     
     # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
     data_clean = create_moving_average_features(data_clean, window)
     
-    # เพิ่มฟีเจอร์ lag และค่าเฉลี่ยเคลื่อนที่เข้าไปใน feature_cols
+    # เพิ่มฟีเจอร์ lag และ lead เข้าไปใน feature_cols
     lag_cols = [f'lag_{lag}' for lag in lags]
+    lead_cols = [f'lead_{lead}' for lead in leads]
     ma_col = f'ma_{window}'
     feature_cols.extend(lag_cols)
+    feature_cols.extend(lead_cols)
     feature_cols.append(ma_col)
     
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
-    data_clean = data_clean.dropna(subset=feature_cols)
+    # เติมค่าที่ขาดหายไปในฟีเจอร์ lag และ lead ด้วยค่าเฉลี่ยของฟีเจอร์
+    for col in lag_cols + lead_cols:
+        data_clean[col] = data_clean[col].fillna(data_clean[col].mean())
     
-    X = data_clean[feature_cols]
+    data_clean[ma_col] = data_clean[ma_col].fillna(data_clean[ma_col].mean())
+    
+    X = data_clean[feature_cols[9:]]
     y = data_clean['wl_up']
     return X, y
 
@@ -172,66 +180,94 @@ def fill_code_column(data):
         data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
     return data
 
+def handle_initial_missing_values(data_clean, initial_period='2D'):
+    # กำหนดช่วงเวลาเริ่มต้นที่ต้องการจัดการ
+    initial_end_time = data_clean['datetime'].min() + pd.Timedelta(initial_period)
+    
+    # เลือกข้อมูลในช่วงเริ่มต้น
+    initial_data = data_clean[data_clean['datetime'] <= initial_end_time]
+    
+    # เติมค่าที่ขาดหายไปด้วยการ Interpolation แบบเชิงเส้น
+    initial_data['wl_up'] = initial_data['wl_up'].interpolate(method='linear')
+    
+    # รวมข้อมูลที่เติมค่าจากช่วงเริ่มต้นกับข้อมูลทั้งหมด
+    data_clean.loc[data_clean['datetime'] <= initial_end_time, 'wl_up'] = initial_data['wl_up']
+    
+    return data_clean
+
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
     feature_cols = [
-        'year', 'month', 'day', 'hour', 'minute',
-        'day_of_week', 'day_of_year', 'week_of_year', 'days_in_month', 'wl_up_prev',
-        'lag_1', 'lag_4', 'lag_96', 'lag_192', 'ma_672'
+        'wl_up_prev',
+        'lag_1', 'lag_4', 'lag_96', 'lag_192',
+        'lead_1', 'lead_4', 'lead_96', 'lead_192',
+        'ma_672'
     ]
-
+    
+    data_clean = handle_initial_missing_values(data_clean, initial_period='2D')
+    
     data = data_clean.copy()
-
+    
     # Convert start_date and end_date to datetime
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date) + pd.DateOffset(hours=23, minutes=45)
-
+    
     # Filter data based on the datetime range
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
-
+    
     # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
     if data.empty:
         st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
         st.stop()
-
+    
     # Generate all missing dates within the selected range
     data_with_all_dates = generate_missing_dates(data)
     data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
-
+    
     # เติมค่า missing ใน wl_up_prev
     if 'wl_up_prev' in data_with_all_dates.columns:
         data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
     else:
         data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
-
-    # สร้างฟีเจอร์ lag และค่าเฉลี่ยเคลื่อนที่
-    data_with_all_dates = create_lag_features(data_with_all_dates, lags=[1, 4, 96, 192])
+    
+    # สร้างฟีเจอร์ lag และ lead
+    data_with_all_dates = create_lag_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192])
     data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
-
-    # เติมค่า missing ในฟีเจอร์ lag และ ma
+    
+    # เติมค่า missing ในฟีเจอร์ lag และ lead
     lag_cols = ['lag_1', 'lag_4', 'lag_96', 'lag_192']
+    lead_cols = ['lead_1', 'lead_4', 'lead_96', 'lead_192']
     ma_col = 'ma_672'
-    data_with_all_dates[lag_cols] = data_with_all_dates[lag_cols].interpolate(method='linear')
+    data_with_all_dates[lag_cols + lead_cols] = data_with_all_dates[lag_cols + lead_cols].interpolate(method='linear')
     data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
-
-    # Update data_missing and data_not_missing after adding lag and ma
+    
+    # Update data_missing and data_not_missing after adding lag and lead features
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
-
+    
     if len(data_missing) == 0:
-        st.write("No missing values to predict.")
+        st.write("ไม่มีค่าที่หายไปเพื่อพยากรณ์")
         return data_with_all_dates
-
+    
     # Train initial model with all available data
+    timearray = []
+    tic = time.time()
     X_train, y_train = prepare_features(data_not_missing)
+    toc = time.time()
+    timearray.append(toc-tic)
+    tic = time.time()
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
-
+    
+    toc = time.time()
+    timearray.append(toc-tic)
+    st.write(timearray)
+    
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
         st.error("ไม่สามารถสร้างโมเดลได้ กรุณาตรวจสอบข้อมูล")
         return data_with_all_dates
-
+    
     # Fill missing values
     for idx, row in data_missing.iterrows():
         X_missing = row[feature_cols].values.reshape(1, -1)
@@ -243,10 +279,12 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         except Exception as e:
             st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
             continue
-
+    
+    st.dataframe(X_train, use_container_width=True)
+    
     # สร้างคอลัมน์ wl_up2 ที่รวมข้อมูลเดิมกับค่าที่เติม
     data_with_all_dates['wl_up2'] = data_with_all_dates['wl_up'].combine_first(data_with_all_dates['wl_forecast'])
-
+    
     data_with_all_dates.reset_index(drop=True, inplace=True)
     return data_with_all_dates
 
@@ -738,8 +776,8 @@ with st.sidebar:
 
         # เลือกช่วงวันที่ใน sidebar
         with st.sidebar.expander("เลือกช่วงข้อมูลสำหรับฝึกโมเดล", expanded=False):
-            start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-05-01"))
-            end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-05-31"))
+            start_date = st.date_input("วันที่เริ่มต้น", value=pd.to_datetime("2024-08-01"))
+            end_date = st.date_input("วันที่สิ้นสุด", value=pd.to_datetime("2024-08-31"))
             
             # เพิ่มตัวเลือกว่าจะลบข้อมูลหรือไม่
             delete_data_option = st.checkbox("ต้องการเลือกลบข้อมูล", value=False)
