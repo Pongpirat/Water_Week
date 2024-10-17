@@ -431,7 +431,7 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
     })
 
-    if data_deleted_option:
+    if data_deleted_option and data_deleted is not None:
         data_after_deleted = pd.DataFrame({
             'วันที่': data_deleted['datetime'],
             'ข้อมูลหลังลบ': data_deleted['wl_up']
@@ -439,33 +439,35 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     else:
         data_after_deleted = None
 
-    # ผสานข้อมูลเพื่อให้แน่ใจว่าค่า wl_up ก่อนถูกลบแสดงในตาราง
-    data_filled_with_original = pd.merge(
-        data_filled,
-        data_before[['datetime', 'wl_up']],
-        on='datetime',
-        how='left',
-        suffixes=('', '_original')
-    )
-
-    # แทนที่ค่า 'wl_up' ใน data_filled ด้วยค่า wl_up ดั้งเดิม
-    data_filled_with_original['wl_up'] = data_filled_with_original['wl_up_original']
-
     # รวมข้อมูลสำหรับกราฟ
     combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
 
-    if data_after_deleted is not None:
+    if data_after_deleted is not None and not data_after_deleted.empty:
         combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
 
-    # กำหนดรายการ y ที่จะแสดงในกราฟ
-    y_columns = ['ข้อมูลหลังเติมค่า', 'ข้อมูลเดิม']
-    if data_after_deleted is not None:
-        y_columns.append('ข้อมูลหลังลบ')
+    # กำหนดลำดับของ y_columns และระบุสีตามเงื่อนไข
+    if data_after_deleted is not None and not data_after_deleted.empty:
+        # ถ้ามี "ข้อมูลหลังลบ"
+        y_columns = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า","ข้อมูลหลังลบ"]
+        # ระบุสีเฉพาะสำหรับแต่ละเส้น
+        color_discrete_map = {
+            "ข้อมูลหลังลบ": "#00cc96",
+            "ข้อมูลหลังเติมค่า": "#636efa",
+            "ข้อมูลเดิม": "#ef553b"
+        }
+    else:
+        # ถ้าไม่มี "ข้อมูลหลังลบ"
+        y_columns = ["ข้อมูลหลังเติมค่า", "ข้อมูลเดิม", ]
+        # ระบุสีสำหรับเส้น
+        color_discrete_map = {
+            "ข้อมูลเดิม": "#ef553b",
+            "ข้อมูลหลังเติมค่า": "#636efa"
+        }
 
-    # Plot ด้วย Plotly
+    # วาดกราฟด้วย Plotly โดยระบุสีของเส้น
     fig = px.line(combined_data, x='วันที่', y=y_columns,
                   labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  color_discrete_sequence=px.colors.qualitative.Plotly)
+                  color_discrete_map=color_discrete_map)
 
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
 
@@ -475,19 +477,16 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
 
     # แสดงตารางข้อมูลหลังเติมค่า
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    data_filled_selected = data_filled[['code', 'datetime', 'wl_up2', 'wl_forecast', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
-    # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
-    merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
-    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
-    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
-
+    # คำนวณค่าความแม่นยำถ้ามีการลบข้อมูล
     if data_deleted_option:
         calculate_accuracy_metrics(data_before, data_filled, data_deleted)
     else:
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
+
 
 def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_time_lag_downstream):
     data_pre1 = pd.DataFrame({
