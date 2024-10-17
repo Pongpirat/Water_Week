@@ -71,38 +71,35 @@ def create_time_features(data_clean):
 
     return data_clean
 
-def create_lag_lead_features(data, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192]):
+def create_lag_features(data, lags=[1, 4, 96, 192]):
     for lag in lags:
         data[f'lag_{lag}'] = data['wl_up'].shift(lag)
-    for lead in leads:
-        data[f'lead_{lead}'] = data['wl_up'].shift(-lead)
     return data
 
 def create_moving_average_features(data, window=672):
     data[f'ma_{window}'] = data['wl_up'].rolling(window=window, min_periods=1).mean()
     return data
 
-def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], window=672):
+def prepare_features(data_clean, lags=[1, 4, 96, 192], window=672):
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
         'days_in_month', 'wl_up_prev'
     ]
     
-    # สร้างฟีเจอร์ lag และ lead
-    data_clean = create_lag_lead_features(data_clean, lags, leads)
+    # สร้างฟีเจอร์ lag
+    data_clean = create_lag_features(data_clean, lags)
     
     # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
     data_clean = create_moving_average_features(data_clean, window)
     
-    # เพิ่มฟีเจอร์ lag และ lead เข้าไปใน feature_cols
+    # เพิ่มฟีเจอร์ lag เข้าไปใน feature_cols
     lag_cols = [f'lag_{lag}' for lag in lags]
-    lead_cols = [f'lead_{lead}' for lead in leads]
     ma_col = f'ma_{window}'
-    feature_cols.extend(lag_cols + lead_cols)
+    feature_cols.extend(lag_cols)
     feature_cols.append(ma_col)
     
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag และ lead
+    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
     data_clean = data_clean.dropna(subset=feature_cols)
     
     X = data_clean[feature_cols[9:]]
@@ -205,7 +202,6 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     feature_cols = [
         'wl_up_prev',
         'lag_1', 'lag_4', 'lag_96', 'lag_192',
-        'lead_1', 'lead_4', 'lead_96', 'lead_192',
         'ma_672'
     ]
 
@@ -244,15 +240,14 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     else:
         data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
 
-    # สร้างฟีเจอร์ lag และ lead รวมถึงค่าเฉลี่ยเคลื่อนที่
-    data_with_all_dates = create_lag_lead_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192])
+    # สร้างฟีเจอร์ lag และค่าเฉลี่ยเคลื่อนที่
+    data_with_all_dates = create_lag_features(data_with_all_dates, lags=[1, 4, 96, 192])
     data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
 
-    # เติมค่า missing ในฟีเจอร์ lag และ lead
+    # เติมค่า missing ในฟีเจอร์ lag
     lag_cols = ['lag_1', 'lag_4', 'lag_96', 'lag_192']
-    lead_cols = ['lead_1', 'lead_4', 'lead_96', 'lead_192']
     ma_col = 'ma_672'
-    data_with_all_dates[lag_cols + lead_cols] = data_with_all_dates[lag_cols + lead_cols].interpolate(method='linear')
+    data_with_all_dates[lag_cols] = data_with_all_dates[lag_cols].interpolate(method='linear')
     data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
 
     # แบ่งข้อมูลเป็นช่วงที่ขาดหายไปและไม่ขาดหายไป
