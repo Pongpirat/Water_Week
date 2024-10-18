@@ -194,21 +194,34 @@ def handle_initial_missing_values(data, initial_days=2, freq='15T'):
 
 # ฟังก์ชันสำหรับจัดการค่าที่ขาดหายไปทีละสัปดาห์
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
-    # กำหนดฟีเจอร์ที่ใช้ในโมเดล รวมถึงฟีเจอร์จาก Upstream และ Downstream
+    # ตรวจสอบว่าข้อมูลที่รวมมีคอลัมน์ Upstream และ Downstream หรือไม่
+    has_upstream = 'wl_up_upstream' in data_clean.columns and not data_clean['wl_up_upstream'].isna().all()
+    has_downstream = 'wl_up_downstream' in data_clean.columns and not data_clean['wl_up_downstream'].isna().all()
+    
+    # กำหนดฟีเจอร์ที่ใช้ในโมเดล รวมถึงฟีเจอร์จาก Upstream และ Downstream ถ้ามี
     feature_cols = [
         'year', 'month', 'day', 'hour', 'minute',
         'day_of_week', 'day_of_year', 'week_of_year',
         'days_in_month', 'wl_up_prev',
-        'wl_up_upstream', 'wl_up_downstream',
         'wl_up_lag_1', 'wl_up_lag_4', 'wl_up_lag_96', 'wl_up_lag_192',
         'wl_up_lead_1', 'wl_up_lead_4', 'wl_up_lead_96', 'wl_up_lead_192',
-        'ma_672',
-        'wl_up_upstream_lag_1', 'wl_up_upstream_lag_4', 'wl_up_upstream_lag_96', 'wl_up_upstream_lag_192',
-        'wl_up_upstream_lead_1', 'wl_up_upstream_lead_4', 'wl_up_upstream_lead_96', 'wl_up_upstream_lead_192',
-        'wl_up_downstream_lag_1', 'wl_up_downstream_lag_4', 'wl_up_downstream_lag_96', 'wl_up_downstream_lag_192',
-        'wl_up_downstream_lead_1', 'wl_up_downstream_lead_4', 'wl_up_downstream_lead_96', 'wl_up_downstream_lead_192'
+        'ma_672'
     ]
-
+    
+    if has_upstream:
+        feature_cols += [
+            'wl_up_upstream',
+            'wl_up_upstream_lag_1', 'wl_up_upstream_lag_4', 'wl_up_upstream_lag_96', 'wl_up_upstream_lag_192',
+            'wl_up_upstream_lead_1', 'wl_up_upstream_lead_4', 'wl_up_upstream_lead_96', 'wl_up_upstream_lead_192'
+        ]
+    
+    if has_downstream:
+        feature_cols += [
+            'wl_up_downstream',
+            'wl_up_downstream_lag_1', 'wl_up_downstream_lag_4', 'wl_up_downstream_lag_96', 'wl_up_downstream_lag_192',
+            'wl_up_downstream_lead_1', 'wl_up_downstream_lead_4', 'wl_up_downstream_lead_96', 'wl_up_downstream_lead_192'
+        ]
+    
     # เติมค่าที่ขาดหายไปในช่วงเริ่มต้น
     initial_periods = 2 * 24 * (60 // 15)  # initial_days=2
     initial_indices = data_clean.index[:initial_periods]
@@ -241,15 +254,21 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     # เติมค่า missing ใน wl_up_prev
     data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
 
-    # เติมค่า missing ใน wl_up_upstream และ wl_up_downstream ด้วยการ Interpolation
-    data_with_all_dates['wl_up_upstream'] = data_with_all_dates['wl_up_upstream'].interpolate(method='linear')
-    data_with_all_dates['wl_up_downstream'] = data_with_all_dates['wl_up_downstream'].interpolate(method='linear')
+    # เติมค่า missing ใน wl_up_upstream และ wl_up_downstream ด้วยการ Interpolation ถ้ามี
+    if has_upstream:
+        data_with_all_dates['wl_up_upstream'] = data_with_all_dates['wl_up_upstream'].interpolate(method='linear')
+    if has_downstream:
+        data_with_all_dates['wl_up_downstream'] = data_with_all_dates['wl_up_downstream'].interpolate(method='linear')
 
     # สร้างฟีเจอร์เวลา
     data_with_all_dates = create_time_features(data_with_all_dates)
 
     # สร้างฟีเจอร์ lag และ lead รวมถึงค่าเฉลี่ยเคลื่อนที่ สำหรับทุกคอลัมน์ที่เกี่ยวข้อง
-    columns = ['wl_up', 'wl_up_upstream', 'wl_up_downstream']
+    columns = ['wl_up']
+    if has_upstream:
+        columns.append('wl_up_upstream')
+    if has_downstream:
+        columns.append('wl_up_downstream')
     data_with_all_dates = create_lag_lead_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], columns=columns)
     data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
 
