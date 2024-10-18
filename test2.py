@@ -1,4 +1,4 @@
-import streamlit as st 
+import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -8,7 +8,7 @@ import altair as alt
 import plotly.express as px
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
-# ฟังก์ชันสำหรับโหลดข้อมูล
+# ฟังก์ชันจากโค้ดแรก (Random Forest)
 def load_data(file):
     message_placeholder = st.empty()  # สร้างตำแหน่งที่ว่างสำหรับข้อความแจ้งเตือน
     if file is None:
@@ -34,7 +34,6 @@ def load_data(file):
     finally:
         message_placeholder.empty()  # ลบข้อความแจ้งเตือนเมื่อเสร็จสิ้นการโหลดไฟล์
 
-# ฟังก์ชันสำหรับทำความสะอาดข้อมูล
 def clean_data(df):
     data_clean = df.copy()
     data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
@@ -56,7 +55,6 @@ def clean_data(df):
     
     return data_clean
 
-# ฟังก์ชันสำหรับสร้างฟีเจอร์เวลา
 def create_time_features(data_clean):
     if not pd.api.types.is_datetime64_any_dtype(data_clean['datetime']):
         data_clean['datetime'] = pd.to_datetime(data_clean['datetime'], errors='coerce')
@@ -73,37 +71,63 @@ def create_time_features(data_clean):
 
     return data_clean
 
-# ฟังก์ชันสำหรับสร้างฟีเจอร์ lag และ lead สำหรับหลายคอลัมน์
-def create_lag_lead_features(data, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], columns=['wl_up']):
-    for column in columns:
-        for lag in lags:
-            data[f'{column}_lag_{lag}'] = data[column].shift(lag)
-        for lead in leads:
-            data[f'{column}_lead_{lead}'] = data[column].shift(-lead)
+def create_lag_lead_features(data, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192]):
+    for lag in lags:
+        data[f'lag_{lag}'] = data['wl_up'].shift(lag)
+    for lead in leads:
+        data[f'lead_{lead}'] = data['wl_up'].shift(-lead)
     return data
 
-# ฟังก์ชันสำหรับสร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
 def create_moving_average_features(data, window=672):
     data[f'ma_{window}'] = data['wl_up'].rolling(window=window, min_periods=1).mean()
     return data
 
-# ฟังก์ชันสำหรับเตรียมฟีเจอร์
-def prepare_features(data_clean, feature_cols):
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์ที่กำหนด
+def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], window=672):
+    feature_cols = [
+        'year', 'month', 'day', 'hour', 'minute',
+        'day_of_week', 'day_of_year', 'week_of_year',
+        'days_in_month', 'wl_up_prev'
+    ]
+    
+    # สร้างฟีเจอร์ lag และ lead สำหรับสถานีหลัก
+    data_clean = create_lag_lead_features(data_clean, lags, leads)
+    # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
+    data_clean = create_moving_average_features(data_clean, window)
+    
+    # เพิ่มฟีเจอร์ lag และ lead เข้าไปใน feature_cols
+    lag_cols = [f'lag_{lag}' for lag in lags]
+    lead_cols = [f'lead_{lead}' for lead in leads]
+    ma_col = f'ma_{window}'
+    feature_cols.extend(lag_cols + lead_cols)
+    feature_cols.append(ma_col)
+    
+    # ตรวจสอบว่ามีข้อมูล Upstream และ Downstream หรือไม่ แล้วสร้างฟีเจอร์ lag สำหรับข้อมูลเหล่านั้น
+    if 'wl_up_upstream' in data_clean.columns:
+        for lag in lags:
+            data_clean[f'lag_{lag}_upstream'] = data_clean['wl_up_upstream'].shift(lag)
+        lag_cols_upstream = [f'lag_{lag}_upstream' for lag in lags]
+        feature_cols.extend(lag_cols_upstream)
+        
+    if 'wl_up_downstream' in data_clean.columns:
+        for lag in lags:
+            data_clean[f'lag_{lag}_downstream'] = data_clean['wl_up_downstream'].shift(lag)
+        lag_cols_downstream = [f'lag_{lag}_downstream' for lag in lags]
+        feature_cols.extend(lag_cols_downstream)
+    
+    # ลบแถวที่มีค่า NaN ในฟีเจอร์ทั้งหมด
     data_clean = data_clean.dropna(subset=feature_cols)
     
-    X = data_clean[feature_cols]
+    X = data_clean[feature_cols[9:]]  # ใช้ฟีเจอร์ทั้งหมดหลังจาก 'wl_up_prev'
     y = data_clean['wl_up']
     return X, y
 
-# ฟังก์ชันสำหรับฝึกและประเมินผลโมเดล
 def train_and_evaluate_model(X, y, model_type='random_forest'):
-    if X.empty or y.empty:
-        st.error("ไม่มีข้อมูลเพียงพอสำหรับการฝึกโมเดล")
-        return None
-
     # แบ่งข้อมูลเป็นชุดฝึกและชุดทดสอบ
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # แสดงฟีเจอร์ที่ใช้ในการฝึกโมเดล
+    st.write("ฟีเจอร์ที่ใช้ในการฝึกโมเดล:")
+    st.write(X_train.head())  # พิมพ์ค่าฟีเจอร์ที่ถูกใช้ในการฝึกโมเดล
 
     # ฝึกโมเดลด้วยชุดฝึก
     if model_type == 'random_forest':
@@ -114,13 +138,8 @@ def train_and_evaluate_model(X, y, model_type='random_forest'):
         st.error("โมเดลที่เลือกไม่ถูกต้อง")
         return None
 
-    # ตรวจสอบว่าฝึกโมเดลสำเร็จหรือไม่
-    if model is None:
-        st.error("การฝึกโมเดลล้มเหลว")
-        return None
     return model
 
-# ฟังก์ชันสำหรับฝึกโมเดล Random Forest
 def train_random_forest(X_train, y_train):
     param_distributions = {
         'n_estimators': [200, 300, 400, 500, 600],
@@ -148,13 +167,12 @@ def train_random_forest(X_train, y_train):
 
     return random_search.best_estimator_
 
-# ฟังก์ชันสำหรับฝึกโมเดล Linear Regression
 def train_linear_regression_model(X_train, y_train):
     model = LinearRegression()
     model.fit(X_train, y_train)
     return model
 
-# ฟังก์ชันสำหรับสร้างวันที่ที่ขาดหายไป
+# ฟังก์ชันเพิ่มเติมจากโค้ดแรก
 def generate_missing_dates(data):
     if data['datetime'].isnull().all():
         st.error("ไม่มีข้อมูลวันที่ในข้อมูลที่ให้มา")
@@ -164,22 +182,25 @@ def generate_missing_dates(data):
     data_with_all_dates = pd.merge(all_dates, data, on='datetime', how='left')
     return data_with_all_dates
 
-# ฟังก์ชันสำหรับเติมคอลัมน์ 'code'
 def fill_code_column(data):
     if 'code' in data.columns:
         data['code'] = data['code'].fillna(method='ffill').fillna(method='bfill')
     return data
 
-# ฟังก์ชันสำหรับคำนวณจำนวนทศนิยม
 def get_decimal_places(series):
+    """
+    ฟังก์ชันเพื่อประมาณจำนวนทศนิยมในข้อมูลที่ไม่ขาดหาย
+    """
+    # แปลงค่าที่ไม่ใช่ NaN เป็นสตริง
     series_non_null = series.dropna().astype(str)
+    # แยกจำนวนทศนิยม
     decimal_counts = series_non_null.apply(lambda x: len(x.split('.')[-1]) if '.' in x else 0)
+    # คืนค่าจำนวนทศนิยมที่พบบ่อยที่สุด
     if not decimal_counts.empty:
         return decimal_counts.mode()[0]
     else:
         return 2  # ค่าเริ่มต้นถ้าไม่พบข้อมูล
 
-# ฟังก์ชันสำหรับจัดการค่าที่ขาดหายไปในช่วงเริ่มต้น
 def handle_initial_missing_values(data, initial_days=2, freq='15T'):
     initial_periods = initial_days * 24 * (60 // 15)  # จำนวนช่วงเวลาใน initial_days
     for i in range(initial_periods):
@@ -192,36 +213,14 @@ def handle_initial_missing_values(data, initial_days=2, freq='15T'):
                 data.at[i, 'wl_up'] = data['wl_up'].iloc[i-1]
     return data
 
-# ฟังก์ชันสำหรับจัดการค่าที่ขาดหายไปทีละสัปดาห์
 def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='random_forest'):
-    # ตรวจสอบว่าข้อมูลที่รวมมีคอลัมน์ Upstream และ Downstream หรือไม่
-    has_upstream = 'wl_up_upstream' in data_clean.columns and not data_clean['wl_up_upstream'].isna().all()
-    has_downstream = 'wl_up_downstream' in data_clean.columns and not data_clean['wl_up_downstream'].isna().all()
-    
-    # กำหนดฟีเจอร์ที่ใช้ในโมเดล รวมถึงฟีเจอร์จาก Upstream และ Downstream ถ้ามี
     feature_cols = [
-        'year', 'month', 'day', 'hour', 'minute',
-        'day_of_week', 'day_of_year', 'week_of_year',
-        'days_in_month', 'wl_up_prev',
-        'wl_up_lag_1', 'wl_up_lag_4', 'wl_up_lag_96', 'wl_up_lag_192',
-        'wl_up_lead_1', 'wl_up_lead_4', 'wl_up_lead_96', 'wl_up_lead_192',
+        'wl_up_prev',
+        'lag_1', 'lag_4', 'lag_96', 'lag_192',
+        'lead_1', 'lead_4', 'lead_96', 'lead_192',
         'ma_672'
     ]
-    
-    if has_upstream:
-        feature_cols += [
-            'wl_up_upstream',
-            'wl_up_upstream_lag_1', 'wl_up_upstream_lag_4', 'wl_up_upstream_lag_96', 'wl_up_upstream_lag_192',
-            'wl_up_upstream_lead_1', 'wl_up_upstream_lead_4', 'wl_up_upstream_lead_96', 'wl_up_upstream_lead_192'
-        ]
-    
-    if has_downstream:
-        feature_cols += [
-            'wl_up_downstream',
-            'wl_up_downstream_lag_1', 'wl_up_downstream_lag_4', 'wl_up_downstream_lag_96', 'wl_up_downstream_lag_192',
-            'wl_up_downstream_lead_1', 'wl_up_downstream_lead_4', 'wl_up_downstream_lead_96', 'wl_up_downstream_lead_192'
-        ]
-    
+
     # เติมค่าที่ขาดหายไปในช่วงเริ่มต้น
     initial_periods = 2 * 24 * (60 // 15)  # initial_days=2
     initial_indices = data_clean.index[:initial_periods]
@@ -235,11 +234,11 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
 
     data = data_clean.copy()
 
-    # Convert start_date and end_date to datetime
+    # แปลง start_date และ end_date เป็น datetime
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
 
-    # Filter data based on the datetime range
+    # กรองข้อมูลตามช่วงวันที่เลือก
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
 
     # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
@@ -247,53 +246,56 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
         st.stop()
 
-    # Generate all missing dates within the selected range
+    # สร้างวันที่ทั้งหมดที่ขาดหายไปในช่วงที่เลือก
     data_with_all_dates = generate_missing_dates(data)
-    data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
+
+    # อย่าเซ็ต 'datetime' เป็น index เพื่อหลีกเลี่ยงความสับสน
+    # data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
 
     # เติมค่า missing ใน wl_up_prev
-    data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
+    if 'wl_up_prev' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up_prev'].interpolate(method='linear')
+    else:
+        data_with_all_dates['wl_up_prev'] = data_with_all_dates['wl_up'].shift(1).interpolate(method='linear')
 
-    # เติมค่า missing ใน wl_up_upstream และ wl_up_downstream ด้วยการ Interpolation ถ้ามี
-    if has_upstream:
-        data_with_all_dates['wl_up_upstream'] = data_with_all_dates['wl_up_upstream'].interpolate(method='linear')
-    if has_downstream:
-        data_with_all_dates['wl_up_downstream'] = data_with_all_dates['wl_up_downstream'].interpolate(method='linear')
-
-    # สร้างฟีเจอร์เวลา
-    data_with_all_dates = create_time_features(data_with_all_dates)
-
-    # สร้างฟีเจอร์ lag และ lead รวมถึงค่าเฉลี่ยเคลื่อนที่ สำหรับทุกคอลัมน์ที่เกี่ยวข้อง
-    columns = ['wl_up']
-    if has_upstream:
-        columns.append('wl_up_upstream')
-    if has_downstream:
-        columns.append('wl_up_downstream')
-    data_with_all_dates = create_lag_lead_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], columns=columns)
+    # สร้างฟีเจอร์ lag และ lead รวมถึงค่าเฉลี่ยเคลื่อนที่
+    data_with_all_dates = create_lag_lead_features(data_with_all_dates, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192])
     data_with_all_dates = create_moving_average_features(data_with_all_dates, window=672)
 
     # เติมค่า missing ในฟีเจอร์ lag และ lead
-    lag_cols = [f'{column}_lag_{lag}' for column in columns for lag in [1, 4, 96, 192]]
-    lead_cols = [f'{column}_lead_{lead}' for column in columns for lead in [1, 4, 96, 192]]
+    lag_cols = ['lag_1', 'lag_4', 'lag_96', 'lag_192']
+    lead_cols = ['lead_1', 'lead_4', 'lead_96', 'lead_192']
     ma_col = 'ma_672'
     data_with_all_dates[lag_cols + lead_cols] = data_with_all_dates[lag_cols + lead_cols].interpolate(method='linear')
     data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
 
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์ทั้งหมด
-    data_with_all_dates = data_with_all_dates.dropna(subset=feature_cols)
+    # เติมค่า missing ในข้อมูล Upstream และสร้างฟีเจอร์ lag
+    if 'wl_up_upstream' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_upstream'] = data_with_all_dates['wl_up_upstream'].interpolate(method='linear')
+        for lag in [1, 4, 96, 192]:
+            data_with_all_dates[f'lag_{lag}_upstream'] = data_with_all_dates['wl_up_upstream'].shift(lag)
+        lag_cols_upstream = [f'lag_{lag}_upstream' for lag in [1, 4, 96, 192]]
+        data_with_all_dates[lag_cols_upstream] = data_with_all_dates[lag_cols_upstream].interpolate(method='linear')
+        feature_cols.extend(lag_cols_upstream)
 
-    # ตรวจสอบว่ามีข้อมูลสำหรับฝึกโมเดลหรือไม่
-    if data_with_all_dates.empty:
-        st.error("ไม่มีข้อมูลเพียงพอหลังจากการสร้างฟีเจอร์")
-        st.stop()
+    # เติมค่า missing ในข้อมูล Downstream และสร้างฟีเจอร์ lag
+    if 'wl_up_downstream' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_downstream'] = data_with_all_dates['wl_up_downstream'].interpolate(method='linear')
+        for lag in [1, 4, 96, 192]:
+            data_with_all_dates[f'lag_{lag}_downstream'] = data_with_all_dates['wl_up_downstream'].shift(lag)
+        lag_cols_downstream = [f'lag_{lag}_downstream' for lag in [1, 4, 96, 192]]
+        data_with_all_dates[lag_cols_downstream] = data_with_all_dates[lag_cols_downstream].interpolate(method='linear')
+        feature_cols.extend(lag_cols_downstream)
 
     # แบ่งข้อมูลเป็นช่วงที่ขาดหายไปและไม่ขาดหายไป
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
     if len(data_missing) == 0:
-        st.write("ไม่มีค่าที่ขาดหายไปสำหรับการพยากรณ์")
-        return data_with_all_dates
+        # ถ้าไม่มีข้อมูลที่ขาดหายไป ต้องสร้าง 'wl_up2' ให้ตรงกับ 'wl_up'
+        data_filled = data_with_all_dates.copy()
+        data_filled['wl_up2'] = data_filled['wl_up']
+        return data_filled
 
     # สร้าง DataFrame เพื่อเก็บผลลัพธ์
     data_filled = data_with_all_dates.copy()
@@ -303,24 +305,40 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     missing_groups = data_filled[data_filled['wl_up'].isnull()].groupby('missing_group')
 
     # เตรียมโมเดล Random Forest หนึ่งครั้งก่อนวนลูป
-    X_train, y_train = prepare_features(data_not_missing, feature_cols)
+    X_train, y_train = prepare_features(data_not_missing)
 
-    # ตรวจสอบว่าชุดข้อมูลฝึกโมเดลไม่ว่างเปล่า
-    if X_train.empty or y_train.empty:
-        st.error("ไม่มีข้อมูลเพียงพอสำหรับการฝึกโมเดล")
-        return data_with_all_dates
+    # หา number of decimal places
+    decimal_places = get_decimal_places(data_clean['wl_up'])
+
+    # **ใช้ข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป** ถ้าข้อมูลในสัปดาห์ปัจจุบันไม่เพียงพอ
+    if len(data_not_missing) < 192:
+        # ดึงข้อมูลสัปดาห์ก่อนหน้า
+        week_prev = data_clean[
+            (data_clean['datetime'] < start_date) & 
+            (data_clean['datetime'] >= start_date - pd.Timedelta(weeks=1))
+        ]
+        
+        # ดึงข้อมูลสัปดาห์ถัดไป
+        week_next = data_clean[
+            (data_clean['datetime'] > end_date) & 
+            (data_clean['datetime'] <= end_date + pd.Timedelta(weeks=1))
+        ]
+
+        # รวมข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป
+        data_not_missing = pd.concat([data_not_missing, week_prev, week_next])
+        
+        # สร้างฟีเจอร์ใหม่สำหรับการฝึกโมเดล
+        X_train, y_train = prepare_features(data_not_missing)
 
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
 
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
         st.error("ไม่สามารถสร้างโมเดลได้ กรุณาตรวจสอบข้อมูล")
-        return data_with_all_dates
+        # ยังต้องสร้าง 'wl_up2'
+        data_filled['wl_up2'] = data_filled['wl_up']
+        return data_filled
 
-    # หา number of decimal places
-    decimal_places = get_decimal_places(data_clean['wl_up'])
-
-    # การพยากรณ์และเติมค่าที่ขาดหายไป
     for group_name, group_data in missing_groups:
         missing_length = len(group_data)
         idx_start = group_data.index[0]
@@ -348,20 +366,20 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
                     data_filled.at[idx, 'wl_up'] = predicted_value
                     data_filled.at[idx, 'timestamp'] = pd.Timestamp.now()
                 except Exception as e:
-                    st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {data_filled.at[idx, 'datetime']} ได้: {e}")
+                    st.warning(f"ไม่สามารถพยากรณ์ค่าในแถว {idx} ได้: {e}")
                     continue
 
     # สร้างคอลัมน์ wl_up2 ที่รวมข้อมูลเดิมกับค่าที่เติม
     data_filled['wl_up2'] = data_filled['wl_up']
 
     # ลบคอลัมน์ที่ไม่จำเป็น
-    if 'missing_group' in data_filled.columns:
-        data_filled.drop(columns=['missing_group'], inplace=True)
+    data_filled.drop(columns=['missing_group'], inplace=True)
 
+    # Reset index เพื่อหลีกเลี่ยงการที่ 'datetime' เป็นทั้ง index และคอลัมน์
     data_filled.reset_index(drop=True, inplace=True)
+
     return data_filled
 
-# ฟังก์ชันสำหรับลบข้อมูลตามช่วงวันที่กำหนด
 def delete_data_by_date_range(data, delete_start_date, delete_end_date):
     # Convert delete_start_date and delete_end_date to datetime
     delete_start_date = pd.to_datetime(delete_start_date)
@@ -381,7 +399,6 @@ def delete_data_by_date_range(data, delete_start_date, delete_end_date):
 
     return data
 
-# ฟังก์ชันสำหรับคำนวณค่าความแม่นยำ
 def calculate_accuracy_metrics(original, filled, data_deleted):
     # ผสานข้อมูลตาม datetime
     merged_data = pd.merge(original[['datetime', 'wl_up']], filled[['datetime', 'wl_up2']], on='datetime')
@@ -441,19 +458,21 @@ def create_comparison_table_streamlit(forecasted_data, actual_data):
     })
     return comparison_df
 
-# ฟังก์ชันสำหรับสร้างกราฟและแสดงผลลัพธ์
 def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
+    # สร้าง DataFrame สำหรับข้อมูลเดิม
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
         'ข้อมูลเดิม': data_before['wl_up']
     })
 
+    # สร้าง DataFrame สำหรับข้อมูลหลังเติมค่า
     data_after_filled = pd.DataFrame({
         'วันที่': data_filled['datetime'],
         'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
     })
 
-    if data_deleted_option and data_deleted is not None:
+    # สร้าง DataFrame สำหรับข้อมูลหลังลบ ถ้ามีการลบข้อมูล
+    if data_deleted_option:
         data_after_deleted = pd.DataFrame({
             'วันที่': data_deleted['datetime'],
             'ข้อมูลหลังลบ': data_deleted['wl_up']
@@ -461,55 +480,91 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     else:
         data_after_deleted = None
 
-    # รวมข้อมูลสำหรับกราฟ
+    # ผสานข้อมูลเดิมและข้อมูลหลังเติมค่า
     combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
 
-    if data_after_deleted is not None and not data_after_deleted.empty:
+    # ถ้ามีข้อมูลหลังลบ ให้ผสานข้อมูลเข้าไป
+    if data_after_deleted is not None:
         combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
 
-    # กำหนดลำดับของ y_columns และระบุสีตามเงื่อนไข
-    if data_after_deleted is not None and not data_after_deleted.empty:
-        # ถ้ามี "ข้อมูลหลังลบ"
-        y_columns = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า","ข้อมูลหลังลบ"]
-        # ระบุสีเฉพาะสำหรับแต่ละเส้น
+    # กำหนดลำดับและสีของเส้นตามเงื่อนไข
+    if data_deleted_option:
+        y_columns = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า", "ข้อมูลหลังลบ"]
         color_discrete_map = {
-            "ข้อมูลหลังลบ": "#00cc96",
+            "ข้อมูลเดิม": "#ef553b",
             "ข้อมูลหลังเติมค่า": "#636efa",
-            "ข้อมูลเดิม": "#ef553b"
+            "ข้อมูลหลังลบ": "#00cc96"
         }
+        category_order = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า", "ข้อมูลหลังลบ"]
     else:
-        # ถ้าไม่มี "ข้อมูลหลังลบ"
         y_columns = ["ข้อมูลหลังเติมค่า", "ข้อมูลเดิม"]
-        # ระบุสีสำหรับเส้น
         color_discrete_map = {
             "ข้อมูลเดิม": "#ef553b",
             "ข้อมูลหลังเติมค่า": "#636efa"
         }
+        category_order = ["ข้อมูลหลังเติมค่า", "ข้อมูลเดิม"]
 
-    # วาดกราฟด้วย Plotly โดยระบุสีของเส้น
-    fig = px.line(combined_data, x='วันที่', y=y_columns,
-                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  color_discrete_map=color_discrete_map)
+    # เปลี่ยนรูปแบบ DataFrame จาก wide เป็น long เพื่อใช้กับ Plotly
+    melted_data = combined_data.melt(id_vars=['วันที่'], value_vars=y_columns, var_name='ประเภทข้อมูล', value_name='ระดับน้ำ (wl_up)')
 
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+    # จัดเรียงประเภทข้อมูลให้เป็น Categorical ตามลำดับที่ต้องการ
+    melted_data['ประเภทข้อมูล'] = pd.Categorical(
+        melted_data['ประเภทข้อมูล'],
+        categories=category_order,
+        ordered=True
+    )
 
-    # แสดงกราฟ
+    # สร้างกราฟด้วย Plotly โดยไม่ใช้พารามิเตอร์ category_order
+    fig = px.line(
+        melted_data,
+        x='วันที่',
+        y='ระดับน้ำ (wl_up)',
+        color='ประเภทข้อมูล',
+        color_discrete_map=color_discrete_map,
+        labels={'ประเภทข้อมูล': 'ประเภทข้อมูล', 'ระดับน้ำ (wl_up)': 'ระดับน้ำ (wl_up)'}
+    )
+
+    # ปรับแต่งเลย์เอาต์ของกราฟ
+    fig.update_layout(
+        xaxis_title="วันที่",
+        yaxis_title="ระดับน้ำ (wl_up)",
+        legend_title="ประเภทข้อมูล",
+        template="plotly_white"  # ใช้ธีมที่ดูสะอาดตา
+    )
+
+    # แสดงกราฟใน Streamlit
     st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
     st.plotly_chart(fig, use_container_width=True)
 
     # แสดงตารางข้อมูลหลังเติมค่า
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled[['code', 'datetime', 'wl_up2', 'wl_forecast', 'timestamp']]
+    data_filled_with_original = pd.merge(
+        data_filled,
+        data_before[['datetime', 'wl_up']],
+        on='datetime',
+        how='left',
+        suffixes=('', '_original')
+    )
+
+    # ตรวจสอบว่ามีคอลัมน์ 'code' หรือไม่
+    if 'code' in data_filled_with_original.columns:
+        data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    else:
+        data_filled_selected = data_filled_with_original[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+
     st.dataframe(data_filled_selected, use_container_width=True)
 
-    # คำนวณค่าความแม่นยำถ้ามีการลบข้อมูล
+    # คำนวณค่าความแม่นยำ
+    merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
+    merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
+    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
+
     if data_deleted_option:
         calculate_accuracy_metrics(data_before, data_filled, data_deleted)
     else:
         st.header("ผลค่าความแม่นยำ", divider='gray')
         st.info("ไม่สามารถคำนวณความแม่นยำได้เนื่องจากไม่มีการลบข้อมูล")
 
-# ฟังก์ชันสำหรับสร้างกราฟตัวอย่างข้อมูล
 def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_time_lag_downstream):
     data_pre1 = pd.DataFrame({
         'datetime': df_pre['datetime'],
@@ -557,22 +612,14 @@ def plot_data_preview(df_pre, df2_pre, df3_pre, total_time_lag_upstream, total_t
     # แสดงกราฟ
     st.plotly_chart(fig, use_container_width=True)
 
-# ฟังก์ชันสำหรับรวมข้อมูลจากสถานีต่างๆ
 def merge_data(df1, df2=None, df3=None):
-    merged_df = df1.copy()
     if df2 is not None:
-        df2 = df2.copy()
-        df2.rename(columns={'wl_up': 'wl_up_upstream'}, inplace=True)
-        merged_df = pd.merge(merged_df, df2[['datetime', 'wl_up_upstream']], on='datetime', how='left')
+        merged_df = pd.merge(df1, df2[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_upstream'))
     else:
-        merged_df['wl_up_upstream'] = np.nan
+        merged_df = df1.copy()
     
     if df3 is not None:
-        df3 = df3.copy()
-        df3.rename(columns={'wl_up': 'wl_up_downstream'}, inplace=True)
-        merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up_downstream']], on='datetime', how='left')
-    else:
-        merged_df['wl_up_downstream'] = np.nan
+        merged_df = pd.merge(merged_df, df3[['datetime', 'wl_up']], on='datetime', how='left', suffixes=('', '_downstream'))
     return merged_df
 
 def merge_data_linear(df1, df2=None):

@@ -89,9 +89,8 @@ def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], wi
         'days_in_month', 'wl_up_prev'
     ]
     
-    # สร้างฟีเจอร์ lag และ lead
+    # สร้างฟีเจอร์ lag และ lead สำหรับสถานีหลัก
     data_clean = create_lag_lead_features(data_clean, lags, leads)
-    
     # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
     data_clean = create_moving_average_features(data_clean, window)
     
@@ -102,10 +101,23 @@ def prepare_features(data_clean, lags=[1, 4, 96, 192], leads=[1, 4, 96, 192], wi
     feature_cols.extend(lag_cols + lead_cols)
     feature_cols.append(ma_col)
     
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag และ lead
+    # ตรวจสอบว่ามีข้อมูล Upstream และ Downstream หรือไม่ แล้วสร้างฟีเจอร์ lag สำหรับข้อมูลเหล่านั้น
+    if 'wl_up_upstream' in data_clean.columns:
+        for lag in lags:
+            data_clean[f'lag_{lag}_upstream'] = data_clean['wl_up_upstream'].shift(lag)
+        lag_cols_upstream = [f'lag_{lag}_upstream' for lag in lags]
+        feature_cols.extend(lag_cols_upstream)
+        
+    if 'wl_up_downstream' in data_clean.columns:
+        for lag in lags:
+            data_clean[f'lag_{lag}_downstream'] = data_clean['wl_up_downstream'].shift(lag)
+        lag_cols_downstream = [f'lag_{lag}_downstream' for lag in lags]
+        feature_cols.extend(lag_cols_downstream)
+    
+    # ลบแถวที่มีค่า NaN ในฟีเจอร์ทั้งหมด
     data_clean = data_clean.dropna(subset=feature_cols)
     
-    X = data_clean[feature_cols[9:]]
+    X = data_clean[feature_cols[9:]]  # ใช้ฟีเจอร์ทั้งหมดหลังจาก 'wl_up_prev'
     y = data_clean['wl_up']
     return X, y
 
@@ -222,11 +234,11 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
 
     data = data_clean.copy()
 
-    # Convert start_date and end_date to datetime
+    # แปลง start_date และ end_date เป็น datetime
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
 
-    # Filter data based on the datetime range
+    # กรองข้อมูลตามช่วงวันที่เลือก
     data = data[(data['datetime'] >= start_date) & (data['datetime'] <= end_date)]
 
     # ตรวจสอบว่ามีข้อมูลในช่วงที่เลือกหรือไม่
@@ -234,9 +246,11 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
         st.error("ไม่มีข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกช่วงวันที่ที่มีข้อมูล")
         st.stop()
 
-    # Generate all missing dates within the selected range
+    # สร้างวันที่ทั้งหมดที่ขาดหายไปในช่วงที่เลือก
     data_with_all_dates = generate_missing_dates(data)
-    data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
+
+    # อย่าเซ็ต 'datetime' เป็น index เพื่อหลีกเลี่ยงความสับสน
+    # data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
 
     # เติมค่า missing ใน wl_up_prev
     if 'wl_up_prev' in data_with_all_dates.columns:
@@ -255,13 +269,33 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     data_with_all_dates[lag_cols + lead_cols] = data_with_all_dates[lag_cols + lead_cols].interpolate(method='linear')
     data_with_all_dates[ma_col] = data_with_all_dates[ma_col].interpolate(method='linear')
 
+    # เติมค่า missing ในข้อมูล Upstream และสร้างฟีเจอร์ lag
+    if 'wl_up_upstream' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_upstream'] = data_with_all_dates['wl_up_upstream'].interpolate(method='linear')
+        for lag in [1, 4, 96, 192]:
+            data_with_all_dates[f'lag_{lag}_upstream'] = data_with_all_dates['wl_up_upstream'].shift(lag)
+        lag_cols_upstream = [f'lag_{lag}_upstream' for lag in [1, 4, 96, 192]]
+        data_with_all_dates[lag_cols_upstream] = data_with_all_dates[lag_cols_upstream].interpolate(method='linear')
+        feature_cols.extend(lag_cols_upstream)
+
+    # เติมค่า missing ในข้อมูล Downstream และสร้างฟีเจอร์ lag
+    if 'wl_up_downstream' in data_with_all_dates.columns:
+        data_with_all_dates['wl_up_downstream'] = data_with_all_dates['wl_up_downstream'].interpolate(method='linear')
+        for lag in [1, 4, 96, 192]:
+            data_with_all_dates[f'lag_{lag}_downstream'] = data_with_all_dates['wl_up_downstream'].shift(lag)
+        lag_cols_downstream = [f'lag_{lag}_downstream' for lag in [1, 4, 96, 192]]
+        data_with_all_dates[lag_cols_downstream] = data_with_all_dates[lag_cols_downstream].interpolate(method='linear')
+        feature_cols.extend(lag_cols_downstream)
+
     # แบ่งข้อมูลเป็นช่วงที่ขาดหายไปและไม่ขาดหายไป
     data_missing = data_with_all_dates[data_with_all_dates['wl_up'].isnull()]
     data_not_missing = data_with_all_dates.dropna(subset=['wl_up'])
 
     if len(data_missing) == 0:
-        st.write("ไม่มีค่าที่ขาดหายไปสำหรับการพยากรณ์")
-        return data_with_all_dates
+        # ถ้าไม่มีข้อมูลที่ขาดหายไป ต้องสร้าง 'wl_up2' ให้ตรงกับ 'wl_up'
+        data_filled = data_with_all_dates.copy()
+        data_filled['wl_up2'] = data_filled['wl_up']
+        return data_filled
 
     # สร้าง DataFrame เพื่อเก็บผลลัพธ์
     data_filled = data_with_all_dates.copy()
@@ -301,7 +335,9 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
     if model is None:
         st.error("ไม่สามารถสร้างโมเดลได้ กรุณาตรวจสอบข้อมูล")
-        return data_with_all_dates
+        # ยังต้องสร้าง 'wl_up2'
+        data_filled['wl_up2'] = data_filled['wl_up']
+        return data_filled
 
     for group_name, group_data in missing_groups:
         missing_length = len(group_data)
@@ -339,7 +375,9 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     # ลบคอลัมน์ที่ไม่จำเป็น
     data_filled.drop(columns=['missing_group'], inplace=True)
 
+    # Reset index เพื่อหลีกเลี่ยงการที่ 'datetime' เป็นทั้ง index และคอลัมน์
     data_filled.reset_index(drop=True, inplace=True)
+
     return data_filled
 
 def delete_data_by_date_range(data, delete_start_date, delete_end_date):
@@ -421,16 +459,19 @@ def create_comparison_table_streamlit(forecasted_data, actual_data):
     return comparison_df
 
 def plot_results(data_before, data_filled, data_deleted, data_deleted_option=False):
+    # สร้าง DataFrame สำหรับข้อมูลเดิม
     data_before_filled = pd.DataFrame({
         'วันที่': data_before['datetime'],
         'ข้อมูลเดิม': data_before['wl_up']
     })
 
+    # สร้าง DataFrame สำหรับข้อมูลหลังเติมค่า
     data_after_filled = pd.DataFrame({
         'วันที่': data_filled['datetime'],
         'ข้อมูลหลังเติมค่า': data_filled['wl_up2']
     })
 
+    # สร้าง DataFrame สำหรับข้อมูลหลังลบ ถ้ามีการลบข้อมูล
     if data_deleted_option:
         data_after_deleted = pd.DataFrame({
             'วันที่': data_deleted['datetime'],
@@ -439,7 +480,64 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     else:
         data_after_deleted = None
 
-    # ผสานข้อมูลเพื่อให้แน่ใจว่าค่า wl_up ก่อนถูกลบแสดงในตาราง
+    # ผสานข้อมูลเดิมและข้อมูลหลังเติมค่า
+    combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
+
+    # ถ้ามีข้อมูลหลังลบ ให้ผสานข้อมูลเข้าไป
+    if data_after_deleted is not None:
+        combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
+
+    # กำหนดลำดับและสีของเส้นตามเงื่อนไข
+    if data_deleted_option:
+        y_columns = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า", "ข้อมูลหลังลบ"]
+        color_discrete_map = {
+            "ข้อมูลเดิม": "#ef553b",
+            "ข้อมูลหลังเติมค่า": "#636efa",
+            "ข้อมูลหลังลบ": "#00cc96"
+        }
+        category_order = ["ข้อมูลเดิม", "ข้อมูลหลังเติมค่า", "ข้อมูลหลังลบ"]
+    else:
+        y_columns = ["ข้อมูลหลังเติมค่า", "ข้อมูลเดิม"]
+        color_discrete_map = {
+            "ข้อมูลเดิม": "#ef553b",
+            "ข้อมูลหลังเติมค่า": "#636efa"
+        }
+        category_order = ["ข้อมูลหลังเติมค่า", "ข้อมูลเดิม"]
+
+    # เปลี่ยนรูปแบบ DataFrame จาก wide เป็น long เพื่อใช้กับ Plotly
+    melted_data = combined_data.melt(id_vars=['วันที่'], value_vars=y_columns, var_name='ประเภทข้อมูล', value_name='ระดับน้ำ (wl_up)')
+
+    # จัดเรียงประเภทข้อมูลให้เป็น Categorical ตามลำดับที่ต้องการ
+    melted_data['ประเภทข้อมูล'] = pd.Categorical(
+        melted_data['ประเภทข้อมูล'],
+        categories=category_order,
+        ordered=True
+    )
+
+    # สร้างกราฟด้วย Plotly โดยไม่ใช้พารามิเตอร์ category_order
+    fig = px.line(
+        melted_data,
+        x='วันที่',
+        y='ระดับน้ำ (wl_up)',
+        color='ประเภทข้อมูล',
+        color_discrete_map=color_discrete_map,
+        labels={'ประเภทข้อมูล': 'ประเภทข้อมูล', 'ระดับน้ำ (wl_up)': 'ระดับน้ำ (wl_up)'}
+    )
+
+    # ปรับแต่งเลย์เอาต์ของกราฟ
+    fig.update_layout(
+        xaxis_title="วันที่",
+        yaxis_title="ระดับน้ำ (wl_up)",
+        legend_title="ประเภทข้อมูล",
+        template="plotly_white"  # ใช้ธีมที่ดูสะอาดตา
+    )
+
+    # แสดงกราฟใน Streamlit
+    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # แสดงตารางข้อมูลหลังเติมค่า
+    st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
     data_filled_with_original = pd.merge(
         data_filled,
         data_before[['datetime', 'wl_up']],
@@ -448,37 +546,15 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
         suffixes=('', '_original')
     )
 
-    # แทนที่ค่า 'wl_up' ใน data_filled ด้วยค่า wl_up ดั้งเดิม
-    data_filled_with_original['wl_up'] = data_filled_with_original['wl_up_original']
+    # ตรวจสอบว่ามีคอลัมน์ 'code' หรือไม่
+    if 'code' in data_filled_with_original.columns:
+        data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    else:
+        data_filled_selected = data_filled_with_original[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
 
-    # รวมข้อมูลสำหรับกราฟ
-    combined_data = pd.merge(data_before_filled, data_after_filled, on='วันที่', how='outer')
-
-    if data_after_deleted is not None:
-        combined_data = pd.merge(combined_data, data_after_deleted, on='วันที่', how='outer')
-
-    # กำหนดรายการ y ที่จะแสดงในกราฟ
-    y_columns = ['ข้อมูลหลังเติมค่า', 'ข้อมูลเดิม']
-    if data_after_deleted is not None:
-        y_columns.append('ข้อมูลหลังลบ')
-
-    # Plot ด้วย Plotly
-    fig = px.line(combined_data, x='วันที่', y=y_columns,
-                  labels={'value': 'ระดับน้ำ (wl_up)', 'variable': 'ประเภทข้อมูล'},
-                  color_discrete_sequence=px.colors.qualitative.Plotly)
-
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
-
-    # แสดงกราฟ
-    st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
-    st.plotly_chart(fig, use_container_width=True)
-
-    # แสดงตารางข้อมูลหลังเติมค่า
-    st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
-    data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
     st.dataframe(data_filled_selected, use_container_width=True)
 
-    # ตรวจสอบว่ามีค่าจริงให้เปรียบเทียบหรือไม่ก่อนเรียกฟังก์ชันคำนวณความแม่นยำ
+    # คำนวณค่าความแม่นยำ
     merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
     merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
     comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
