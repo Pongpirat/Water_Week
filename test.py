@@ -250,7 +250,6 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     data_with_all_dates = generate_missing_dates(data)
 
     # อย่าเซ็ต 'datetime' เป็น index เพื่อหลีกเลี่ยงความสับสน
-    # data_with_all_dates.index = pd.to_datetime(data_with_all_dates['datetime'])
 
     # เติมค่า missing ใน wl_up_prev
     if 'wl_up_prev' in data_with_all_dates.columns:
@@ -310,26 +309,7 @@ def handle_missing_values_by_week(data_clean, start_date, end_date, model_type='
     # หา number of decimal places
     decimal_places = get_decimal_places(data_clean['wl_up'])
 
-    # **ใช้ข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป** ถ้าข้อมูลในสัปดาห์ปัจจุบันไม่เพียงพอ
-    if len(data_not_missing) < 192:
-        # ดึงข้อมูลสัปดาห์ก่อนหน้า
-        week_prev = data_clean[
-            (data_clean['datetime'] < start_date) & 
-            (data_clean['datetime'] >= start_date - pd.Timedelta(weeks=1))
-        ]
-        
-        # ดึงข้อมูลสัปดาห์ถัดไป
-        week_next = data_clean[
-            (data_clean['datetime'] > end_date) & 
-            (data_clean['datetime'] <= end_date + pd.Timedelta(weeks=1))
-        ]
-
-        # รวมข้อมูลจากสัปดาห์ก่อนหน้าและสัปดาห์ถัดไป
-        data_not_missing = pd.concat([data_not_missing, week_prev, week_next])
-        
-        # สร้างฟีเจอร์ใหม่สำหรับการฝึกโมเดล
-        X_train, y_train = prepare_features(data_not_missing)
-
+    # ฝึกโมเดล Random Forest หรือ Linear Regression ตามที่เลือก
     model = train_and_evaluate_model(X_train, y_train, model_type=model_type)
 
     # ตรวจสอบว่ามีโมเดลที่ถูกฝึกหรือไม่
@@ -536,28 +516,22 @@ def plot_results(data_before, data_filled, data_deleted, data_deleted_option=Fal
     st.header("ข้อมูลหลังจากการเติมค่าที่หายไป", divider='gray')
     st.plotly_chart(fig, use_container_width=True)
 
-    # แสดงตารางข้อมูลหลังเติมค่า
+    # แสดงตารางข้อมูลหลังเติมค่าโดยไม่รวมคอลัมน์ 'wl_up2'
     st.header("ตารางแสดงข้อมูลหลังเติมค่า", divider='gray')
     data_filled_with_original = pd.merge(
-        data_filled,
+        data_filled[['code', 'datetime', 'wl_forecast', 'timestamp']],
         data_before[['datetime', 'wl_up']],
         on='datetime',
-        how='left',
-        suffixes=('', '_original')
+        how='left'
     )
 
-    # ตรวจสอบว่ามีคอลัมน์ 'code' หรือไม่
-    if 'code' in data_filled_with_original.columns:
-        data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
-    else:
-        data_filled_selected = data_filled_with_original[['datetime', 'wl_up', 'wl_forecast', 'timestamp']]
+    data_filled_selected = data_filled_with_original[['code', 'datetime', 'wl_up', 'wl_forecast', 'timestamp']]
 
     st.dataframe(data_filled_selected, use_container_width=True)
 
     # คำนวณค่าความแม่นยำ
     merged_data = pd.merge(data_before[['datetime', 'wl_up']], data_filled[['datetime', 'wl_up2']], on='datetime')
     merged_data = merged_data.dropna(subset=['wl_up', 'wl_up2'])
-    comparison_data = merged_data[merged_data['wl_up2'] != merged_data['wl_up']]
 
     if data_deleted_option:
         calculate_accuracy_metrics(data_before, data_filled, data_deleted)
